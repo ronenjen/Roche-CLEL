@@ -95,16 +95,6 @@ namespace Biosero.Scripting
                 string DestinationSiblingIdentifier = dest.SiblingIdentifier?.ToString() ?? "";
                 string DestinationLabwareType = dest.CommonName.ToString();
 
-                /*
-                if (dest.ParentIdentifier != null)
-                {
-                    DestinationParent = dest.ParentIdentifier.ToString();
-                }
-                else
-                {
-                    DestinationParent = "";
-                }
-                */
 
 
                 // if not member already - add to a list of all labware types for the order
