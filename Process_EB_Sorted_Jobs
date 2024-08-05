@@ -1,0 +1,162 @@
+#r Roche.LAMA1.dll
+
+using Biosero.DataServices.Client;
+using Biosero.Orchestrator.WorkflowService;
+using Newtonsoft.Json;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Text;
+using System.Linq;
+using Roche.LAMA1;
+using Roche.LAMA1.Models;
+using Roche.LAMA1.MosaicTypes;
+using Biosero.DataServices.RestClient;
+using Biosero.DataModels.Events;
+using Biosero.DataModels.Ordering;
+using Biosero.DataModels.Clients;
+using Biosero.DataModels.Resources;
+using System.Security.Cryptography;
+using System.Collections;
+using System.IO;
+
+
+namespace Biosero.Scripting
+{
+    public class Process_EB_Sorted_Jobs
+    {
+
+
+
+
+        public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
+        {
+            string PrioritisedJobs = context.GetGlobalVariableValue<string>("Prioritised Jobs");
+            string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
+            string FirstReplicationBarcodes = context.GetGlobalVariableValue<string>("RepOnePlaceholderBarcodes");
+            string SecondReplicationBarcodes = context.GetGlobalVariableValue<string>("RepTwoPlaceholderBarcodes");
+            Serilog.Log.Information("FirstReplicationBarcodes= {FirstReplicationBarcodes}", FirstReplicationBarcodes.ToString());
+
+            //instantiate LAMA1 objects
+
+            string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+            IQueryClient _queryClient = new QueryClient(API_BASE_URL);
+            IAccessioningClient _accessioningClient = new AccessioningClient(API_BASE_URL);
+            IEventClient _eventClient = new EventClient(API_BASE_URL);
+
+
+            IdentityHelper _identityHelper;
+
+
+            //Build out and register the root identities (i.e Mosaic Job) if they do not exist
+            _identityHelper = new IdentityHelper(_queryClient, _accessioningClient, _eventClient);
+            _identityHelper.BuildBaseIdentities();
+
+
+            //Get all the sources associated with this order
+            var sources = _identityHelper.GetSources(RequestedOrder).ToList();
+
+            //Get all the destinations associated with this order
+            var destinations = _identityHelper.GetDestinations(RequestedOrder).ToList();
+            //Get all the jobs
+            var jobs = _identityHelper.GetJobs(RequestedOrder).ToList();
+
+            //instantiate LAMA1 objects
+
+
+            List<string> JobReplicationOneBarcodes = new List<string>();
+            List<string> JobReplicationTwoBarcodes = new List<string>();
+
+
+            List<string> PrioritisedJobsList = PrioritisedJobs.Split(',').ToList();
+
+            // Get highest priority job
+            string PrioritisedJobId = PrioritisedJobsList[0];
+
+            Serilog.Log.Information("job= {job}", PrioritisedJobId.ToString());
+
+            //Retrienve job name and identifier from Identities dataset
+            var i = jobs
+            .Where(x => x.Properties.GetValue<string>("JobId") == PrioritisedJobId)
+            .FirstOrDefault();
+
+
+
+
+            string JobName = i.Name;
+            string JobIdentifier = i.Identifier;
+            int CurrentJobId = i.JobId;
+            string Priority = i.Priority;
+            string JobFragment = i.WorkflowFragment;
+
+            //Retrieve destination details from identities dataset
+            var a = destinations
+            .Where(a => a.Properties.GetValue<string>("JobId") == PrioritisedJobId)
+            .FirstOrDefault();
+
+            string AssayLabwareType = a.CommonName;
+
+
+
+            int PriorityId = 0;
+
+            switch (Priority)
+            {
+                case "High":
+                    PriorityId = 1;
+                    break;
+                case "Medium":
+                    PriorityId = 2;
+                    break;
+                case "Low":
+                    PriorityId = 3;
+                    break;
+            }
+
+            Serilog.Log.Information("JobName= {JobName}", JobName.ToString());
+            Serilog.Log.Information("JobIdentifier= {JobIdentifier}", JobIdentifier.ToString());
+            Serilog.Log.Information("Priority= {Priority}", PriorityId.ToString());
+
+            if (JobFragment.Contains("Replicate"))
+            {
+                Serilog.Log.Information("JobFragment= Replicate");
+                await context.AddOrUpdateGlobalVariableAsync("Job Fragment", "Replicate");
+            }
+            else
+            {
+                Serilog.Log.Information("JobFragment= CherryPick");
+                await context.AddOrUpdateGlobalVariableAsync("Job Fragment", "Cherry Pick");
+            }
+
+
+            foreach (var dest in destinations)
+            {
+                string currentDestName = dest.Name;
+                int currentDestJob = dest.JobId;
+
+                if (FirstReplicationBarcodes.Contains(currentDestName) && (!JobReplicationOneBarcodes.Contains(currentDestName)) && (currentDestJob == CurrentJobId))
+                {
+                    Serilog.Log.Information("found a dest= {currentDestName}", currentDestName.ToString());
+                    JobReplicationOneBarcodes.Add(currentDestName);
+
+                }
+            }
+            string AllBarcodesRequiredForReplicteOne = String.Join(", ", JobReplicationOneBarcodes);
+
+
+
+            await context.AddOrUpdateGlobalVariableAsync("ReplicateOneBarcodes", AllBarcodesRequiredForReplicteOne);
+            await context.AddOrUpdateGlobalVariableAsync("Job Number", Int32.Parse(PrioritisedJobId));
+            await context.AddOrUpdateGlobalVariableAsync("Job Priority", PriorityId.ToString());
+
+
+            string result = string.Join(",", PrioritisedJobs.Split(',').Where(s => s != PrioritisedJobId));
+
+            await context.AddOrUpdateGlobalVariableAsync("Prioritised Jobs", result);
+
+        }
+
+    }
+}
+
