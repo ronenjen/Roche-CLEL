@@ -1,0 +1,656 @@
+#r Roche.LAMA1.dll
+
+using Biosero.DataServices.Client;
+using Biosero.Orchestrator.WorkflowService;
+using Newtonsoft.Json;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Text;
+using System.Linq;
+using Roche.LAMA1;
+using Roche.LAMA1.Models;
+using Roche.LAMA1.MosaicTypes;
+using Biosero.DataServices.RestClient;
+using Biosero.DataModels.Events;
+using Biosero.DataModels.Ordering;
+using Biosero.DataModels.Clients;
+using Biosero.DataModels.Resources;
+using System.Security.Cryptography;
+using System.Collections;
+
+
+namespace Biosero.Scripting
+{
+    public class Process_State_Machine_EB
+    {
+
+
+        static string ExtractNumber(string input)
+        {
+            // Initialize an empty result string
+            string result = string.Empty;
+
+            // Iterate through each character in the input string
+            foreach (char c in input)
+            {
+                // Check if the character is a digit or a decimal point
+                if (char.IsDigit(c) || c == '.')
+                {
+                    result += c;
+                }
+                else
+                {
+                    // Stop collecting characters once a non-numeric character is found
+                    break;
+                }
+            }
+
+            // Return the extracted number
+            return result;
+        }
+
+        public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
+        {
+            await context.AddOrUpdateGlobalVariableAsync("IOC Racks Required", false);
+            await context.AddOrUpdateGlobalVariableAsync("IOC Crash Plates Required", false);
+
+
+            string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
+            string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+
+            string ExtractedReplicationVolume = "";
+            string ExtractedNextReplicationVolume = "";
+            string NextReplicateLabware = "";
+            string FurtherReplicateLabware = "";
+            string DestinationCommonName = "";
+
+
+
+            int EBSourcesCount = 0;
+            int RepOneCount = 0;
+            int RepTwoCount = 0;
+
+
+            string JobWorkflowFragment = "";
+
+            IQueryClient _queryClient = new QueryClient(API_BASE_URL);
+            IAccessioningClient _accessioningClient = new AccessioningClient(API_BASE_URL);
+            IEventClient _eventClient = new EventClient(API_BASE_URL);
+
+            List<string> AllCPSourcesForEB = new List<string>();
+            List<string> AllCPSourcesIdentifiersForEB = new List<string>();
+            List<string> AllSerializePlates = new List<string>();
+            List<string> AllReplicatePlates = new List<string>();
+            List<string> AllNextReplicatePlates = new List<string>();
+            List<string> AllCrashPlatesForEB = new List<string>();
+            List<string> AllCrashPlateIdentierssForEB = new List<string>();
+            List<string> AllCrashDestinationsEB = new List<string>();
+            List<string> EchoPairList = new List<string>();
+            List<string> ReplicateOneList = new List<string>();
+
+
+            IdentityHelper _identityHelper;
+
+
+            //Build out and register the root identities (i.e Mosaic Job) if they do not exist
+            _identityHelper = new IdentityHelper(_queryClient, _accessioningClient, _eventClient);
+            _identityHelper.BuildBaseIdentities();
+
+
+            //Get all the sources associated with this order
+            var sources = _identityHelper.GetSources(RequestedOrder).ToList();
+
+            //Get all the destinations associated with this order
+            var destinations = _identityHelper.GetDestinations(RequestedOrder).ToList();
+            //Get all the jobs
+            var jobs = _identityHelper.GetJobs(RequestedOrder).ToList();
+
+
+            //  MosaicDestination? destination = destinations?.FirstOrDefault(d => d.Description == "777");
+            foreach (var dest in destinations)
+            {
+                string DestinationName = dest.Name;
+                string DestinationDescription = dest.Description;
+                string DestinationSampleTransfers = dest.SampleTransfers;
+                string DestinationOperationType = dest.OperationType.ToString();
+                string DestinationJobId = dest.JobId.ToString();
+                string DestinationId = dest.Identifier.ToString();
+                string DestinationParent = dest.ParentIdentifier != null ? dest.ParentIdentifier.ToString() : null;
+                string NextDestName = "";
+                string NextDestIdentifier = "";
+                string NextOperationType = "";
+                string NextReplicateDestName = "";
+                string NextReplicateSibling = "";
+                string NextReplicateDestIdentifier = "";
+                string NextReplicateOperationType = "";
+                string NextReplicateSampleTransfers = "";
+                string NextReplicateID = "";
+                string FurtherReplicateDestName = "";
+                string FurtherReplicateDestIdentifier = "";
+                string FurtherReplicateOperationType = "";
+                string FurtherReplicateSampleTransfers = "";
+                string FurtherReplicateID = "";
+
+
+
+                if (DestinationOperationType == "CherryPick")
+                {
+			var RepParentPlate = sources
+                                .Where(x => x.Name == DestinationName)
+                                .FirstOrDefault();
+                                
+ 
+
+                    // if not member already - add to a list of all EB CP sources for the order
+                    if ((!AllCPSourcesForEB.Contains(DestinationName)) && (RepParentPlate != null))
+                    {
+	                        AllCPSourcesForEB.Add(DestinationName);
+	                        AllCPSourcesIdentifiersForEB.Add(DestinationId);
+                    }
+
+                    // Find a list of all destinations (Serialiase) for the source above (should be only 1 each)
+                    var NextPlates = destinations
+                    .Where(x => x.ParentIdentifier != null &&
+                        x.ParentIdentifier == DestinationId)
+                    .ToList();
+
+                    foreach (var Plate in NextPlates)
+                    {
+                        NextDestName = Plate.Name;
+                        NextDestIdentifier = Plate.Identifier;
+                        NextOperationType = Plate.OperationType.ToString();
+                        string NextId = Plate.Identifier;
+
+
+
+                        // if not member already - add to a list of all serilisation for the order for the order
+                        if (!AllSerializePlates.Contains(NextDestName))
+                        {
+                            AllSerializePlates.Add(NextDestName);
+                        }
+
+
+
+                        if (NextOperationType == "Serialise")
+                        {
+                            var NextReplicatePlates = destinations
+                            .Where(x => x.ParentIdentifier != null &&
+                                x.ParentIdentifier == NextId)
+                            .ToList();
+
+                            foreach (var ReplicatePlate in NextReplicatePlates)
+                            {
+                                NextReplicateDestName = ReplicatePlate.Name;
+                                NextReplicateDestIdentifier = ReplicatePlate.Identifier;
+                                NextReplicateOperationType = ReplicatePlate.OperationType.ToString();
+                                NextReplicateSampleTransfers = ReplicatePlate.SampleTransfers;
+                                NextReplicateID = ReplicatePlate.Identifier;
+                                NextReplicateLabware = ReplicatePlate.CommonName;
+                                NextReplicateSibling = ReplicatePlate.SiblingIdentifier;
+
+
+
+                                var ExtractNum = destinations
+                                .Where(x => x.ParentIdentifier != null && x.Identifier == NextReplicateID)
+                                .FirstOrDefault();
+
+                                if (ExtractedReplicationVolume == "")
+                                {
+                                    ExtractedReplicationVolume = ExtractNumber(ExtractNum.SampleTransfers);
+                                }
+
+
+
+                                // if not member already - add to a list of all Echo plates needed for the order
+                                if (!AllReplicatePlates.Contains(NextReplicateDestName))
+                                {
+                                    AllReplicatePlates.Add(NextReplicateDestName);
+                                }
+
+                                
+
+                                var RepDestSource = sources
+                                .Where(x => x.Identifier == NextReplicateSibling)
+                                .FirstOrDefault();
+
+                                string DestSourceName = RepDestSource.Name;
+
+                          //      Serilog.Log.Information("w777777777777 = {DestSourceName}", DestSourceName.ToString());
+
+                                // Find a list of all Echo plates for each  serialsed plate (if exists)
+                                var FurtherReplicatePlates = destinations
+                                .Where(x => x.ParentIdentifier != null &&
+                                    x.ParentIdentifier == NextReplicateID)
+                                .ToList();
+
+                                int CheckFurtherReplicateExists = FurtherReplicatePlates.Count();
+
+                                if (CheckFurtherReplicateExists > 0)
+                                {
+                                    foreach (var FurtherPlateRep in FurtherReplicatePlates)
+                                    {
+                                        FurtherReplicateDestName = FurtherPlateRep.Name;
+                                        FurtherReplicateDestIdentifier = FurtherPlateRep.Identifier;
+                                        FurtherReplicateOperationType = FurtherPlateRep.OperationType.ToString();
+                                        FurtherReplicateSampleTransfers = FurtherPlateRep.SampleTransfers;
+                                        FurtherReplicateID = FurtherPlateRep.Identifier;
+                                        FurtherReplicateLabware = FurtherPlateRep.CommonName;
+
+                                        var ExtractNectReplicateNum = destinations
+                                        .Where(x => x.ParentIdentifier != null && x.Identifier == FurtherReplicateID)
+                                        .FirstOrDefault();
+
+                                        if (ExtractedNextReplicationVolume == "")
+                                        {
+                                            ExtractedNextReplicationVolume = ExtractNumber(ExtractNectReplicateNum.SampleTransfers);
+                                        }
+
+
+
+                                        // if not member already - add to a list of all Echo plates needed for the order
+                                        if (!AllNextReplicatePlates.Contains(FurtherReplicateDestName))
+                                        {
+                                            AllNextReplicatePlates.Add(FurtherReplicateDestName);
+                                        }
+
+
+                                    }
+                                }
+
+
+
+
+                            }
+
+
+                        }
+                        else if (NextOperationType == "Replicate")
+                        {
+                            // Find a list of all replicates only
+                            var NextReplicatePlates = destinations
+                            .Where(x => x.ParentIdentifier != null)
+                            .ToList();
+
+                            foreach (var ReplicatePlate in NextReplicatePlates)
+                            {
+                                NextReplicateDestName = ReplicatePlate.Name;
+                                NextReplicateDestIdentifier = ReplicatePlate.Identifier;
+                                NextReplicateOperationType = ReplicatePlate.OperationType.ToString();
+                                NextReplicateSampleTransfers = ReplicatePlate.SampleTransfers;
+                                NextReplicateID = ReplicatePlate.Identifier;
+                                NextReplicateLabware = ReplicatePlate.CommonName;
+                                NextReplicateSibling = ReplicatePlate.SiblingIdentifier;
+
+
+                                var ExtractNum = destinations
+                                .Where(x => x.ParentIdentifier != null && x.Identifier == NextReplicateID)
+                                .FirstOrDefault();
+
+                                if (ExtractedReplicationVolume == "")
+                                {
+                                    ExtractedReplicationVolume = ExtractNumber(ExtractNum.SampleTransfers);
+                                }
+
+
+
+                                // if not member already - add to a list of all Echo plates needed for the order
+                                if (!AllReplicatePlates.Contains(NextReplicateDestName))
+                                {
+                                    AllReplicatePlates.Add(NextReplicateDestName);
+                                }
+
+
+                                var RepDestSource = sources
+                                .Where(x => x.Identifier == NextReplicateSibling)
+                                .FirstOrDefault();
+
+                                string DestSourceName = RepDestSource.Name;
+                                
+
+                                if (!EchoPairList.Contains(DestSourceName + "-" + NextReplicateDestName))
+                                {
+                                    EchoPairList.Add(DestSourceName + "-" + NextReplicateDestName);
+                                }
+
+
+                                if (!ReplicateOneList.Contains(NextReplicateDestName))
+                                {
+                                    ReplicateOneList.Add(NextReplicateDestName);
+                                }
+
+                                
+
+
+
+
+                                // Find a list of all Echo plates for each  serialsed plate (if exists)
+                                var FurtherReplicatePlates = destinations
+                                .Where(x => x.ParentIdentifier != null &&
+                                    x.ParentIdentifier == NextReplicateID)
+                                .ToList();
+
+                                int CheckFurtherReplicateExists = FurtherReplicatePlates.Count();
+
+                                if (CheckFurtherReplicateExists > 0)
+                                {
+                                    foreach (var FurtherPlateRep in FurtherReplicatePlates)
+                                    {
+                                        FurtherReplicateDestName = FurtherPlateRep.Name;
+                                        FurtherReplicateDestIdentifier = FurtherPlateRep.Identifier;
+                                        FurtherReplicateOperationType = FurtherPlateRep.OperationType.ToString();
+                                        FurtherReplicateSampleTransfers = FurtherPlateRep.SampleTransfers;
+                                        FurtherReplicateID = FurtherPlateRep.Identifier;
+                                        FurtherReplicateLabware = FurtherPlateRep.CommonName;
+
+                                        var ExtractNectReplicateNum = destinations
+                                        .Where(x => x.ParentIdentifier != null && x.Identifier == FurtherReplicateID)
+                                        .FirstOrDefault();
+
+                                        if (ExtractedNextReplicationVolume == "")
+                                        {
+                                            ExtractedNextReplicationVolume = ExtractNumber(ExtractNectReplicateNum.SampleTransfers);
+                                        }
+
+
+
+                                        // if not member already - add to a list of all Echo plates needed for the order
+                                        if (!AllNextReplicatePlates.Contains(FurtherReplicateDestName))
+                                        {
+                                            AllNextReplicatePlates.Add(FurtherReplicateDestName);
+                                        }
+
+
+                                    }
+                                }
+
+
+
+
+                            }
+
+
+                        }
+                    }
+
+                }
+
+
+            }
+
+
+            string EchoPairListString = String.Join(", ", EchoPairList);
+            string ReplicateOneListString = String.Join(", ", ReplicateOneList);
+            //  Serilog.Log.Information("w777777777777 = {EchoPairListString}", EchoPairListString.ToString());
+            await context.AddOrUpdateGlobalVariableAsync("EchoInstructions", EchoPairListString);
+
+            List<string> highPriorityJobs = new List<string>();
+            List<string> mediumPriorityJobs = new List<string>();
+            List<string> lowPriorityJobs = new List<string>();
+
+            List<string> sortedJobs = new List<string>();
+
+            foreach (var job in jobs)
+            {
+                string JobPriority = job.Priority;
+                string JobNumber = job.JobId.ToString();
+                JobWorkflowFragment = job.WorkflowFragment.ToString();
+
+
+
+
+                switch (JobPriority)
+                {
+                    case "High":
+                        highPriorityJobs.Add(JobNumber);
+                        break;
+                    case "Medium":
+                        mediumPriorityJobs.Add(JobNumber);
+                        break;
+                    case "Low":
+                        lowPriorityJobs.Add(JobNumber);
+                        break;
+                }
+
+            }
+
+            // Combine the lists in the desired order
+            sortedJobs.AddRange(highPriorityJobs);
+            sortedJobs.AddRange(mediumPriorityJobs);
+            sortedJobs.AddRange(lowPriorityJobs);
+
+            string PrioritisedJobs = string.Join(",", sortedJobs);
+            Serilog.Log.Information("Following is the list of Prioritised jobs for order {RequestedOrder}  = {PrioritisedJobs}", PrioritisedJobs.ToString(), RequestedOrder.ToString());
+
+
+            await context.AddOrUpdateGlobalVariableAsync("Prioritised Jobs", PrioritisedJobs);
+
+            if (JobWorkflowFragment == "Replicate")
+            {
+                foreach (var dest in destinations)
+                {
+                    string DestinationName = dest.Name;
+                    string DestinationDescription = dest.Description;
+                    string DestinationSampleTransfers = dest.SampleTransfers;
+                    string DestinationOperationType = dest.OperationType.ToString();
+                    string DestinationJobId = dest.JobId.ToString();
+                    string DestinationId = dest.Identifier.ToString();
+                    string DestinationSibling = dest.SiblingIdentifier.ToString();
+                    DestinationCommonName = dest.CommonName.ToString();
+                    string DestinationParent = dest.ParentIdentifier != null ? dest.ParentIdentifier.ToString() : null;
+
+
+
+
+                    if ((DestinationOperationType == "Replicate") && (DestinationParent == null))
+                    {
+                        // if not member already - add to a list of all EB CP sources for the order
+                        if (!AllCrashDestinationsEB.Contains(DestinationName))
+                        {
+                            AllCrashDestinationsEB.Add(DestinationName);
+                        }
+
+
+                        var SiblingResult = sources
+                                    .Where(x => x.Identifier == DestinationSibling)
+                                    .FirstOrDefault();
+
+                        String crashName = SiblingResult.Name.ToString();
+                        String crashIdentifier = SiblingResult.Identifier.ToString();
+
+                        // if not member already - add to a list of all EB CP sources for the order
+                        if (!AllCrashPlatesForEB.Contains(crashName))
+                        {
+                            AllCrashPlatesForEB.Add(crashName);
+                            AllCrashPlateIdentierssForEB.Add(crashIdentifier);
+                        }
+
+
+
+                    }
+
+
+                }
+
+
+                string CrashNames = String.Join(", ", AllCrashPlatesForEB);
+                string CrashIDs = String.Join(", ", AllCrashPlateIdentierssForEB);
+                string CrashDestinationsEB = String.Join(", ", AllCrashDestinationsEB);
+
+
+                Serilog.Log.Information("CrashNames = {CrashNames}", CrashNames);
+
+                Serilog.Log.Information("CrashIDs = {CrashIDs}", CrashIDs);
+                await context.AddOrUpdateGlobalVariableAsync("CrashPlatesForEB", CrashNames);
+                await context.AddOrUpdateGlobalVariableAsync("CrashDestinationsEB", CrashDestinationsEB);
+                await context.AddOrUpdateGlobalVariableAsync("CrashLabwareType", DestinationCommonName);
+            }
+            else
+            {
+
+                string RepOnePlaceholderBarcodes = "";
+                string RepTwoPlaceholderBarcodes = "";
+
+                EBSourcesCount = AllCPSourcesForEB.Count();
+                RepOneCount = AllReplicatePlates.Count();
+                RepTwoCount = AllNextReplicatePlates.Count();
+
+                List<string> RepOneBarcodes = new List<string>();
+                List<string> RepTwoBarcodes = new List<string>();
+                Serilog.Log.Information("The number of plates sent for first replicate = {RepOneCount}", RepOneCount.ToString());
+                Serilog.Log.Information("The number of plates sent for the second replicate = {RepTwoCount}", RepTwoCount.ToString());
+
+
+                if (RepOneCount > 0)
+                {
+                    for (int i = 1; i <= RepOneCount; i++)
+                    {
+                        RepOneBarcodes.Add("REPOne " + i);
+                    }
+
+                    RepOnePlaceholderBarcodes = String.Join(", ", RepOneBarcodes);
+
+                    string REPOneInstrument = "";
+                    double REPOneVolume = Double.Parse(ExtractedReplicationVolume);
+
+
+                    if (REPOneVolume < 0.5)
+                    {
+                        REPOneInstrument = "Echo";
+                    }
+                    else
+                    {
+                        REPOneInstrument = "Bravo";
+                    }
+
+                }
+
+
+
+                if (RepTwoCount > 0)
+                {
+
+                    for (int i = 1; i <= 10; i++)
+                    {
+                        RepTwoBarcodes.Add("REPTwo " + i);
+                    }
+
+                    RepTwoPlaceholderBarcodes = String.Join(", ", RepTwoBarcodes);
+                    string REPTwoInstrument = "";
+                    double REPTwoVolume = 0;
+
+                    if (ExtractedNextReplicationVolume != "")
+                    {
+                        REPTwoVolume = Double.Parse(ExtractedNextReplicationVolume);
+                    }
+
+                }
+
+
+
+
+                Serilog.Log.Information("Total volume required for the run = {ExtractedReplicationVolume}", ExtractedReplicationVolume.ToString());
+                Serilog.Log.Information("Total volume for the next replicate = {ExtractedNextReplicationVolume}", ExtractedNextReplicationVolume.ToString());
+
+
+
+
+                string EBSources = string.Join(",", AllCPSourcesForEB);
+                string AllEBSources = string.Join(",", AllCPSourcesForEB);
+                string EBSourcesIdentifiers = string.Join(",", AllCPSourcesIdentifiersForEB);
+                string SerializePlates = string.Join(",", AllSerializePlates);
+                string ReplicatePlates = string.Join(",", AllReplicatePlates);
+                string ReplicateTwoReplicatePlates = string.Join(",", AllNextReplicatePlates);
+
+
+                Serilog.Log.Information("The sources required for the run from CP to EB = {EBSources}", EBSources.ToString());
+
+                Serilog.Log.Information("Total sources required for the run from CP to EB = {EBSourcesCount}", EBSourcesCount.ToString());
+
+                await context.AddOrUpdateGlobalVariableAsync("REPOneLabwareType", NextReplicateLabware);
+
+                await context.AddOrUpdateGlobalVariableAsync("REPTwoLabwareType", FurtherReplicateLabware);
+
+                await context.AddOrUpdateGlobalVariableAsync("RepOnePlaceholderBarcodes", ReplicateOneListString);
+
+                await context.AddOrUpdateGlobalVariableAsync("RepTwoPlaceholderBarcodes", RepTwoPlaceholderBarcodes);
+
+                await context.AddOrUpdateGlobalVariableAsync("CPSourcesForEB", EBSources);
+
+                await context.AddOrUpdateGlobalVariableAsync("AllEBSources", AllEBSources);
+                
+                
+
+                await context.AddOrUpdateGlobalVariableAsync("CPSourcesIdentifiersForEB", EBSourcesIdentifiers);
+
+
+
+                Serilog.Log.Information("Placeholder barcodes for replicate one = {ReplicateOneListString}", ReplicateOneListString.ToString());
+
+
+            }
+
+
+
+
+        }
+        public List<Biosero.DataModels.Resources.Identity> GetPlatesWithNumberOfParents<T>(IdentityHelper _helper, QueryClient _queryClient, int nParents, string ownerId)
+        {
+            IEnumerable<DataModels.Resources.Identity> identities = typeof(T) switch
+            {
+                Type t when t == typeof(MosaicSource) => _helper.GetSources(ownerId).Select(od => od as Biosero.DataModels.Resources.Identity),
+                Type t when t == typeof(MosaicDestination) => _helper.GetDestinations(ownerId).Select(od => od as Biosero.DataModels.Resources.Identity),
+                Type t when t == typeof(MosaicJob) => _helper.GetJobs(ownerId).Select(od => od as Biosero.DataModels.Resources.Identity),
+                _ => throw new Exception("Type not supported"),
+            };
+
+            //   Serilog.Log.Information($"There are {orderIdents.Count} identities associated with owner ID {ownerId}");
+            Dictionary<int, List<Biosero.DataModels.Resources.Identity>> identitiesWithNumberOfParents = new Dictionary<int, List<Biosero.DataModels.Resources.Identity>>();
+
+            int numberOfParentsCount;
+            string parent;
+            string Ident;
+
+            foreach (var identity in identities)
+            {
+                numberOfParentsCount = 0;
+                parent = identity.Properties.GetOrDefaultValue("ParentIdentifier", string.Empty);
+                Ident = identity.Identifier;
+                //	Serilog.Log.Information($"Parent ID = {parent}");
+                while (parent != string.Empty)
+                {                    //add null check here?
+                    Biosero.DataModels.Resources.Identity parentId = _queryClient.GetIdentity(parent);
+                    parent = parentId.Properties.GetOrDefaultValue("ParentIdentifier", string.Empty);
+                    //Serilog.Log.Information($"Parent ID = {parent}");
+                    numberOfParentsCount += 1;
+                }
+
+                if (identitiesWithNumberOfParents.ContainsKey(numberOfParentsCount))
+                {
+                    identitiesWithNumberOfParents[numberOfParentsCount].Add(identity);
+                }
+
+                else
+                {
+                    identitiesWithNumberOfParents.Add(numberOfParentsCount, new List<Biosero.DataModels.Resources.Identity> { identity });
+                }
+            }
+            foreach (KeyValuePair<int, List<Biosero.DataModels.Resources.Identity>> kvp in identitiesWithNumberOfParents)
+            {
+                //   Serilog.Log.Information($"There are {kvp.Value.Count} identities with  {kvp.Key} parents");
+            }
+            if (identitiesWithNumberOfParents.ContainsKey(nParents))
+            {
+                return identitiesWithNumberOfParents[nParents];
+            }
+            else
+            {
+                return new List<Biosero.DataModels.Resources.Identity>();
+            }
+        }
+
+    }
+}
+
+
