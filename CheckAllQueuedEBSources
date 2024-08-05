@@ -1,0 +1,244 @@
+using Biosero.DataServices.Client;
+using Biosero.Orchestrator.WorkflowService;
+using Newtonsoft.Json;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Text;
+using System.Linq;
+using Roche.LAMA1;
+using Roche.LAMA1.Models;
+using Roche.LAMA1.MosaicTypes;
+using Biosero.DataServices.RestClient;
+using Biosero.DataModels.Events;
+using Biosero.DataModels.Ordering;
+using Biosero.DataModels.Clients;
+using Biosero.DataModels.Resources;
+using System.Security.Cryptography;
+using System.Collections;
+
+
+namespace Biosero.Scripting
+{
+    public class CheckAllQueuedEBSources
+    {
+        public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
+        {
+            string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
+            string CPSourcesForEB = context.GetGlobalVariableValue<string>("CPSourcesForEB");
+            string DestLabwareType = "";
+            string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+            IQueryClient _queryClient = new QueryClient(API_BASE_URL);
+            IAccessioningClient _accessioningClient = new AccessioningClient(API_BASE_URL);
+            IEventClient _eventClient = new EventClient(API_BASE_URL);
+
+            List<string> AllDestinationsForOrder = new List<string>();
+            List<string> QueuedDestinationsForOrder = new List<string>();
+            List<string> ReadyDestinationsForEB = new List<string>();
+            List<string> TransportedSourcesForEB = new List<string>();
+            List<string> CPToEBBarcodes = CPSourcesForEB.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+
+            string EBSources = string.Join(",", CPToEBBarcodes);
+            string initialReadyDestinations = string.Join(",", ReadyDestinationsForEB);
+            IdentityHelper _identityHelper;
+
+            //Build out and register the root identities (i.e Mosaic Job) if they do not exist
+            _identityHelper = new IdentityHelper(_queryClient, _accessioningClient, _eventClient);
+            _identityHelper.BuildBaseIdentities();
+
+            //Get all the sources associated with this order
+            var sources = _identityHelper.GetSources(RequestedOrder).ToList();
+            //Get all the Sources associated with this order
+            var destinations = _identityHelper.GetDestinations(RequestedOrder).ToList();
+            //Get all the jobs
+            var jobs = _identityHelper.GetJobs(RequestedOrder).ToList();
+
+            foreach (var dest in destinations)
+            {
+                string DestID = dest.Identifier;
+                string DestName = dest.Name;
+                string DestType = dest.TypeIdentifier;
+                string DestState = dest.Status.ToString();
+                string DestOperationType = dest.OperationType.ToString();
+                string DestSampleTransfers = dest.SampleTransfers.ToString();
+
+                if (DestOperationType == "Replicate")
+                {
+                    string cleanedInput = DestSampleTransfers.Trim();
+                    // Convert the cleaned string to a double
+                    double result = double.Parse(cleanedInput);
+                }
+
+                bool isInList = CPToEBBarcodes.Contains(DestName);
+                if (isInList)
+                {
+                    if (!AllDestinationsForOrder.Contains(DestName))
+                    {
+                        AllDestinationsForOrder.Add(DestName);
+                        QueuedDestinationsForOrder.Add(DestName);
+                        Serilog.Log.Information("### Adding {DestName} to QueuedDestinationsForOrder and AllDestinationsForOrder", DestName.ToString());
+                    }
+
+                    Serilog.Log.Information("Looking for any Finished plates for Order {RequestedOrder}", RequestedOrder.ToString());
+                    Serilog.Log.Information("Current Plate Name  {DestName}", DestName.ToString());
+
+                    var cc = sources
+                    .Where(x => x.Name == DestName)
+                    .FirstOrDefault();
+
+                    string SameSource = cc.Name;
+                    Serilog.Log.Information("Found a source with the same name   {SameSource}", SameSource.ToString());
+                    string SameSourceStatus = cc.Status.ToString();
+
+                    if ((!ReadyDestinationsForEB.Contains(DestName)) && (DestState == "Finished") && (SameSourceStatus == "Pending"))
+                    {
+                        Serilog.Log.Information("Got One!= {DestName}", DestName.ToString());
+                        ReadyDestinationsForEB.Add(DestName);
+                        DestLabwareType = dest.CommonName.ToString();
+                        Console.WriteLine($"***********       CheckAllQueuedEBSources: Adding Plate to ReadyDestinatonForEB, SameSource = {SameSource}, ReadyDestinationsForEB.Count = {ReadyDestinationsForEB.Count} " + Environment.NewLine);
+                    }
+                    if ((!TransportedSourcesForEB.Contains(DestName)) && (DestState == "Finished") && (SameSourceStatus != "Pending"))
+                    {
+                        Serilog.Log.Information("Looking for any transporting  plates for Order {RequestedOrder}", RequestedOrder.ToString());
+                        Serilog.Log.Information("This one was sent= {DestName}", DestName.ToString());
+                        TransportedSourcesForEB.Add(DestName);
+                        Console.WriteLine($"***********       CheckAllQueuedEBSources: Adding Plate to TransportedSourcesForEB , SameSource = {SameSource}, TransportedSourcesForEB.Count = {TransportedSourcesForEB.Count} " + Environment.NewLine);
+                    }
+
+                    /*
+                     if ((!ReadyDestinationsForEB.Contains(DestName)) && (DestState == "Finished") && ((SameSourceStatus != "Finished") && (SameSourceStatus != "Transfered")))
+                     {
+                         Serilog.Log.Information("Got One!= {DestName}", DestName.ToString());
+                         ReadyDestinationsForEB.Add(DestName);
+                         DestLabwareType = dest.CommonName.ToString();
+             Console.WriteLine($"***********       CheckAllQueuedEBSources: Adding Plate to ReadyDestinatonForEB, SameSource = {SameSource}, ReadyDestinationsForEB.Count = {ReadyDestinationsForEB.Count} "+ Environment.NewLine );
+                     }
+                     else if ((!TransportedSourcesForEB.Contains(DestName)) && (DestState == "Transporting") && (SameSourceStatus != "Finished") && (SameSourceStatus != "Transfered"))
+                     {
+                         Serilog.Log.Information("Looking for any transporting  plates for Order {RequestedOrder}",  RequestedOrder.ToString() );
+                         Serilog.Log.Information("This one was sent= {DestName}", DestName.ToString());
+                         TransportedSourcesForEB.Add(DestName);
+             Console.WriteLine($"***********       CheckAllQueuedEBSources: Adding Plate to TransportedSourcesForEB , SameSource = {SameSource}, TransportedSourcesForEB.Count = {TransportedSourcesForEB.Count} "+ Environment.NewLine );
+                     }
+                     */
+                }
+            }
+
+            string AllEBDestinedSources = string.Join(",", AllDestinationsForOrder);
+            int TotalEBDestinedSources = AllDestinationsForOrder.Count;
+
+            Serilog.Log.Information("List all the plates that are need in EB form CP for order  {RequestedOrder}", RequestedOrder.ToString());
+            Serilog.Log.Information("All queued plates= {AllEBDestinedSources}", AllEBDestinedSources.ToString());
+            Serilog.Log.Information("Total Queued plates= {TotalEBDestinedSources}", TotalEBDestinedSources.ToString());
+
+            string AllQueuedEBDestinedSources = string.Join(",", QueuedDestinationsForOrder);
+            int TotalEBQueuedDestinedSources = QueuedDestinationsForOrder.Count;
+            string AllEBReadySources = "";
+            int TotalEBReadySources = 0;
+            string AllEBTransportedSources = "";
+            int TotalEBTransportedSources = 0;
+
+            if (ReadyDestinationsForEB.Count() > 0)
+            {
+                AllEBReadySources = string.Join(",", ReadyDestinationsForEB);
+                TotalEBReadySources = ReadyDestinationsForEB.Count;
+            }
+            else
+            {
+                AllEBReadySources = "";
+                TotalEBReadySources = 0;
+            }
+
+            Serilog.Log.Information("Got Two!= {AllEBReadySources}", AllEBReadySources.ToString());
+
+            if (TransportedSourcesForEB.Count() > 0)
+            {
+                AllEBTransportedSources = string.Join(",", TransportedSourcesForEB);
+                TotalEBTransportedSources = TransportedSourcesForEB.Count;
+            }
+            else
+            {
+                AllEBTransportedSources = "";
+                TotalEBTransportedSources = 0;
+            }
+
+            Serilog.Log.Information("Total plate sources coming to EB from CP= {TotalEBDestinedSources} ", TotalEBDestinedSources.ToString());
+            Serilog.Log.Information("Total destinations marked as finished= {TotalEBQueuedDestinedSources} ", TotalEBQueuedDestinedSources.ToString());
+            Serilog.Log.Information("Got Three= {AllEBReadySources} ", AllEBReadySources.ToString());
+            Serilog.Log.Information("total finished = {TotalEBReadySources} ", TotalEBReadySources.ToString());
+            Serilog.Log.Information("All  EB transported sources= {AllEBTransportedSources} ", AllEBTransportedSources.ToString());
+            Serilog.Log.Information("Total EB transported sources= {TotalEBTransportedSources} ", TotalEBTransportedSources.ToString());
+
+            await context.AddOrUpdateGlobalVariableAsync("TotalEBTransportedSources", TotalEBTransportedSources);
+            await context.AddOrUpdateGlobalVariableAsync("TotalEBQueuedDestinedSources", TotalEBQueuedDestinedSources);
+
+            await context.AddOrUpdateGlobalVariableAsync("EBSourcesToBeTransferred", AllEBReadySources);
+            await context.AddOrUpdateGlobalVariableAsync("TotalEBReadySources", TotalEBReadySources);
+            await context.AddOrUpdateGlobalVariableAsync("EBRempSourceLabwareType", DestLabwareType);
+
+        }
+
+
+
+
+
+
+
+        public List<Biosero.DataModels.Resources.Identity> GetPlatesWithNumberOfParents<T>(IdentityHelper _helper, QueryClient _queryClient, int nParents, string ownerId)
+        {
+            IEnumerable<DataModels.Resources.Identity> identities = typeof(T) switch
+            {
+                Type t when t == typeof(MosaicSource) => _helper.GetSources(ownerId).Select(od => od as Biosero.DataModels.Resources.Identity),
+                Type t when t == typeof(MosaicSource) => _helper.GetSources(ownerId).Select(od => od as Biosero.DataModels.Resources.Identity),
+                Type t when t == typeof(MosaicJob) => _helper.GetJobs(ownerId).Select(od => od as Biosero.DataModels.Resources.Identity),
+                _ => throw new Exception("Type not supported"),
+            };
+
+            //   Serilog.Log.Information($"There are {orderIdents.Count} identities associated with owner ID {ownerId}");
+            Dictionary<int, List<Biosero.DataModels.Resources.Identity>> identitiesWithNumberOfParents = new Dictionary<int, List<Biosero.DataModels.Resources.Identity>>();
+
+            int numberOfParentsCount;
+            string parent;
+            string Ident;
+
+            foreach (var identity in identities)
+            {
+                numberOfParentsCount = 0;
+                parent = identity.Properties.GetOrDefaultValue("ParentIdentifier", string.Empty);
+                Ident = identity.Identifier;
+                //	Serilog.Log.Information($"Parent ID = {parent}");
+                while (parent != string.Empty)
+                {                    //add null check here?
+                    Biosero.DataModels.Resources.Identity parentId = _queryClient.GetIdentity(parent);
+                    parent = parentId.Properties.GetOrDefaultValue("ParentIdentifier", string.Empty);
+                    //Serilog.Log.Information($"Parent ID = {parent}");
+                    numberOfParentsCount += 1;
+                }
+
+                if (identitiesWithNumberOfParents.ContainsKey(numberOfParentsCount))
+                {
+                    identitiesWithNumberOfParents[numberOfParentsCount].Add(identity);
+                }
+
+                else
+                {
+                    identitiesWithNumberOfParents.Add(numberOfParentsCount, new List<Biosero.DataModels.Resources.Identity> { identity });
+                }
+            }
+            foreach (KeyValuePair<int, List<Biosero.DataModels.Resources.Identity>> kvp in identitiesWithNumberOfParents)
+            {
+                //   Serilog.Log.Information($"There are {kvp.Value.Count} identities with  {kvp.Key} parents");
+            }
+            if (identitiesWithNumberOfParents.ContainsKey(nParents))
+            {
+                return identitiesWithNumberOfParents[nParents];
+            }
+            else
+            {
+                return new List<Biosero.DataModels.Resources.Identity>();
+            }
+        }
+
+    }
+}
