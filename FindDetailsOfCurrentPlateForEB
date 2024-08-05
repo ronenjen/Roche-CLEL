@@ -1,0 +1,211 @@
+#r Roche.LAMA1.dll
+
+using Biosero.DataModels.Clients;
+using Biosero.DataModels.Events;
+using Biosero.DataModels.Ordering;
+using Biosero.DataModels.Resources;
+using Biosero.DataServices.Client;
+using Biosero.DataServices.RestClient;
+using Biosero.Orchestrator.WorkflowService;
+using Newtonsoft.Json;
+using Roche.LAMA1.Models;
+using Roche.LAMA1.MosaicTypes;
+using Roche.LAMA1;
+using System.Collections.Generic;
+using System.Collections;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading.Tasks;
+using System.Threading;
+using System;
+
+
+
+namespace Biosero.Scripting
+{
+    public class FindDetailsOfCurrentPlateForEB
+    {
+        public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
+        {
+            string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
+            string CurrentSource = context.GetGlobalVariableValue<string>("CurrentSourcePlate");
+            await context.AddOrUpdateGlobalVariableAsync("HigherPriorityJob", false);
+
+            await context.AddOrUpdateGlobalVariableAsync("CurrentSourcePlate", "");
+
+            Serilog.Log.Information("<<<<<<<<{CurrentSource}", CurrentSource.ToString());
+            string CurrentSourcesOnEB = context.GetGlobalVariableValue<string>("CurrentSourcesOnEB");
+            string SourceStatus = "";
+
+
+            string CurrentPriority = context.GetGlobalVariableValue<string>("CurrentEBPriority").ToString();
+            Serilog.Log.Information("<<<<<<<<{CurrentPriority}", CurrentPriority.ToString());
+            int CurrentJobPriorityNumber = 0;
+
+            if (CurrentPriority != "")
+            {
+                CurrentJobPriorityNumber = Int32.Parse(CurrentPriority);
+            }
+
+            int RequestedJob = context.GetGlobalVariableValue<int>("Job Number");
+            int identityJobID = 0;
+
+            bool JobFoundOnEB = false;
+            bool HigherPriorityJob = false;
+
+
+            string SourceIndentityState = "";
+            string SourceIdentityPriority = "";
+
+            string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+            IQueryClient _queryClient = new QueryClient(API_BASE_URL);
+            IAccessioningClient _accessioningClient = new AccessioningClient(API_BASE_URL);
+            IEventClient _eventClient = new EventClient(API_BASE_URL);
+
+
+            IdentityHelper _identityHelper;
+
+
+            //Build out and register the root identities (i.e Mosaic Job) if they do not exist
+            _identityHelper = new IdentityHelper(_queryClient, _accessioningClient, _eventClient);
+            _identityHelper.BuildBaseIdentities();
+
+            var sources = _identityHelper.GetSources(RequestedOrder).ToList();
+
+            var destinations = _identityHelper.GetDestinations(RequestedOrder).ToList();
+
+            Serilog.Log.Information("Section 1");
+
+
+            // look for a destination with same barcode as the current source
+
+            var c = CurrentSource != null
+                ? destinations.Where(x => x.Name == CurrentSource).FirstOrDefault()
+                : null;
+
+
+            Serilog.Log.Information("Section 1a before");
+            if (c != null)
+            {
+                //if one found
+                string DestName = c.Name;
+                string DestPriority = c.Priority;
+                int DestJob = c.JobId;
+                int DestPriorityNumber = 0;
+
+
+                Serilog.Log.Information("Section 1a");
+                Serilog.Log.Information("Section 1a {DestName}", DestName);
+                // get the priority for it
+                switch (DestPriority)
+                {
+                    case "High":
+                        DestPriorityNumber = 1;
+                        break;
+                    case "Medium":
+                        DestPriorityNumber = 2;
+                        break;
+                    case "Low":
+                        DestPriorityNumber = 3;
+                        break;
+                }
+
+                Serilog.Log.Information("Section 1b");
+
+                Serilog.Log.Information("Section 2");
+
+                await context.AddOrUpdateGlobalVariableAsync("JobPriorityNumber", DestPriorityNumber);
+                await context.AddOrUpdateGlobalVariableAsync("Job Number", DestJob);
+
+                //get all sources currently on EB
+                string[] sourcesArray = CurrentSourcesOnEB.Split(',', ' ', StringSplitOptions.RemoveEmptyEntries);
+
+
+                Serilog.Log.Information("Section 3");
+                Serilog.Log.Information("sourcesArray {sourcesArray}", sourcesArray);
+
+                //loop through every source on EB
+                foreach (string src in sourcesArray)
+                {
+                    Serilog.Log.Information("DestName {DestName}", DestName);
+                    Serilog.Log.Information("src {src}", src);
+                    if (src == DestName)
+                    {
+                        Serilog.Log.Information("outside loop {src}", src.ToString());
+
+                        var ee = sources
+                    .Where(x => x.Name == src)
+                    .First();
+                        //grt the status of the current source
+                        SourceStatus = ee.Status.ToString();
+
+                        Serilog.Log.Information("outside loop3 {SourceStatus}", SourceStatus.ToString());
+
+                        //      if (SourceStatus == "Pending")
+                        //      {
+                        //          Serilog.Log.Information("outside loop {src}", src.ToString());
+
+
+                        //           Serilog.Log.Information("Section 3a");
+                        //           Serilog.Log.Information("{src}", src.ToString());
+                        //            int JobPriorityNumber = 0;
+
+                        //             var d = destinations
+                        //           .Where(x => x.Name == src)
+                        //          .FirstOrDefault();
+
+                        //                   Serilog.Log.Information("Section 3b");
+                        // Serilog.Log.Information("This plate is on EB currently {src}", src);
+                        //                   Serilog.Log.Information("This status of plate currently  on EB currently {SourceStatus}", SourceStatus);
+
+                        // if source found, set boolean for job found to true
+                        if ((src != "") && (SourceStatus == "Pending"))
+                        {
+                            Serilog.Log.Information("Section 4");
+                            JobFoundOnEB = true;
+                            await context.AddOrUpdateGlobalVariableAsync("JobFoundOnEB", JobFoundOnEB);
+                        }
+
+
+
+                        //      Serilog.Log.Information("DestName{DestName}", DestName);
+                        //       Serilog.Log.Information("DestPriorityNumber{DestPriorityNumber}", DestPriorityNumber);
+                        //       Serilog.Log.Information("CurrentJobPriorityNumber  {CurrentJobPriorityNumber}", CurrentJobPriorityNumber);
+
+
+                    }
+
+
+                    Serilog.Log.Information("CurrentSource{CurrentSource}", CurrentSource);
+
+                    var ee1 = sources
+                .Where(x => x.Name == CurrentSource)
+                .First();
+                    //grt the status of the current source
+                    string SourceStatus1 = ee1.Status.ToString();
+
+
+
+
+
+                    Serilog.Log.Information("SourceStatus1{SourceStatus1}", SourceStatus1);
+                    Serilog.Log.Information("DestPriorityNumber{DestPriorityNumber}", DestPriorityNumber);
+                    Serilog.Log.Information("CurrentJobPriorityNumber{CurrentJobPriorityNumber}", CurrentJobPriorityNumber);
+
+                    if ((DestPriorityNumber < CurrentJobPriorityNumber) && (SourceStatus1 == "Pending"))
+                    {
+                        Serilog.Log.Information("Section 5");
+                        HigherPriorityJob = true;
+                        await context.AddOrUpdateGlobalVariableAsync("HigherPriorityJob", HigherPriorityJob);
+                        await context.AddOrUpdateGlobalVariableAsync("CurrentSourcePlate", DestName);
+                    }
+
+                }
+            }
+
+        }
+
+
+    }
+}
