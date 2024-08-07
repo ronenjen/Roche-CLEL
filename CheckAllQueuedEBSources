@@ -33,8 +33,20 @@ using System.Text.RegularExpressions;
 
 namespace Biosero.Scripting
 {
+
     public class CheckAllQueuedEBSources
     {
+        public string EvaluateDouble(double value)
+        {
+            if (value >= 0.5)
+            {
+                return "BRAVO";
+            }
+            else
+            {
+                return "ECHO";
+            }
+        }
         public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
         {
             Console.WriteLine($"***********      START OF CHECKALLQUEUED ***************" + Environment.NewLine);
@@ -106,14 +118,8 @@ namespace Biosero.Scripting
                         // Convert the cleaned string to a double
                         double RepOneTransferVolume = double.Parse(cleanedInputForReplicateOne);
 
-                            if (RepOneTransferVolume >= 0.5)
-                            {
-                            EBOperationOne = "Bravo";
-                            }
-                            else
-                            {
-                                EBOperationOne = "Echo";
-                            }
+                        EBOperationOne = EvaluateDouble(RepOneTransferVolume);
+
 
                         Console.WriteLine($"***********  First Operation for the order: {EBOperationOne} " + Environment.NewLine);
                         EBRequiredOperations.Add(EBOperationOne);
@@ -142,14 +148,7 @@ namespace Biosero.Scripting
                             // Convert the cleaned string to a double
                             double RepTwoTransferVolume = double.Parse(cleanedInputForReplicateTwo);
 
-                            if (RepTwoTransferVolume >= 0.5)
-                            {
-                                EBOperationTwo = "Bravo";
-                            }
-                            else
-                            {
-                                EBOperationTwo = "Echo";
-                            }
+                            EBOperationTwo = EvaluateDouble(RepTwoTransferVolume);
 
                             Console.WriteLine($"***********  Second Operation for the order: {EBOperationTwo} " + Environment.NewLine);
                             EBRequiredOperations.Add(EBOperationTwo);
@@ -178,14 +177,7 @@ namespace Biosero.Scripting
                                 // Convert the cleaned string to a double
                                 double RepThreeTransferVolume = double.Parse(cleanedInputForReplicateThree);
 
-                                if (RepThreeTransferVolume >= 0.5)
-                                {
-                                    EBOperationThree = "Bravo";
-                                }
-                                else
-                                {
-                                    EBOperationThree = "Echo";
-                                }
+                                EBOperationThree = EvaluateDouble(RepThreeTransferVolume);
 
                                 Console.WriteLine($"***********  Third Operation for the order: {EBOperationThree} " + Environment.NewLine);
                                 EBRequiredOperations.Add(EBOperationThree);
@@ -214,14 +206,7 @@ namespace Biosero.Scripting
                                     // Convert the cleaned string to a double
                                     double RepFourTransferVolume = double.Parse(cleanedInputForReplicateFour);
 
-                                    if (RepFourTransferVolume >= 0.5)
-                                    {
-                                        EBOperationFour = "Bravo";
-                                    }
-                                    else
-                                    {
-                                        EBOperationFour = "Echo";
-                                    }
+                                    EBOperationFour = EvaluateDouble(RepFourTransferVolume);
 
                                     Console.WriteLine($"***********  Fourth Operation for the order: {EBOperationFour} " + Environment.NewLine);
                                     EBRequiredOperations.Add(EBOperationFour);
@@ -237,7 +222,7 @@ namespace Biosero.Scripting
                                 .Where(x => x.ParentIdentifier == FourthDestID)
                                 .FirstOrDefault();
 
-                                if ((FifthDestination != null) && (EBOperationFive ==""))
+                                if ((FifthDestination != null) && (EBOperationFive == ""))
                                 {
                                     string FifthDestID = FifthDestination.Identifier;
                                     EBOperationFive = FifthDestination.OperationType.ToString();
@@ -250,14 +235,7 @@ namespace Biosero.Scripting
                                         // Convert the cleaned string to a double
                                         double RepiveTransferVolume = double.Parse(cleanedInputForReplicateFive);
 
-                                        if (RepiveTransferVolume >= 0.5)
-                                        {
-                                            EBOperationFive = "Bravo";
-                                        }
-                                        else
-                                        {
-                                            EBOperationFive = "Echo";
-                                        }
+                                        EBOperationFive = EvaluateDouble(RepiveTransferVolume);
 
                                         Console.WriteLine($"***********  Fifth Operation for the order: {EBOperationFive} " + Environment.NewLine);
                                         EBRequiredOperations.Add(EBOperationFive);
