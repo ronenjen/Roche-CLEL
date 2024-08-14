@@ -40,11 +40,11 @@ namespace Biosero.Scripting
         {
             if (value >= 0.5)
             {
-                return "BRAVO";
+                return "Bravo";
             }
             else
             {
-                return "ECHO";
+                return "Echo";
             }
         }
         public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
@@ -53,6 +53,11 @@ namespace Biosero.Scripting
             //retrieve initial global variables values
             string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
             string CPSourcesForEB = context.GetGlobalVariableValue<string>("CPSourcesForEB");
+
+
+            Console.WriteLine($"******CPSourcesForEB is here: {CPSourcesForEB} " + Environment.NewLine);
+
+
             string DestLabwareType = "";
             string EBOperationOne = "";
             string EBOperationTwo = "";
@@ -103,14 +108,15 @@ namespace Biosero.Scripting
                 string DestState = dest.Status.ToString();
                 string DestOperationType = dest.OperationType.ToString();
                 string DestSampleTransfers = dest.SampleTransfers.ToString();
-                string DestParentIdentifier = dest.ParentIdentifier != null ? dest.ParentIdentifier.ToString() : "No ParentIdentifier";
+
+
+                bool isFirstOperation = string.IsNullOrWhiteSpace(dest.ParentIdentifier);
+                //     string DestParentIdentifier = dest.ParentIdentifier != null ? dest.ParentIdentifier.ToString() : "No ParentIdentifier";
 
                 //if the destination is top of the destination tree (so no parent identifier)
-                if ((DestParentIdentifier == "No ParentIdentifier") && (EBOperationOne == ""))
+                if ((isFirstOperation) && (EBOperationOne == ""))
                 {
                     EBOperationOne = DestOperationType;
-
-
                     //Add to list of EB operation if not Cherry Pick
                     if ((EBOperationOne != "CherryPick") && (EBOperationOne == "Replicate"))
                     {
@@ -284,12 +290,17 @@ namespace Biosero.Scripting
                     .FirstOrDefault();
 
                     string SameSource = cc.Name;
+                    string SameSourceIdentifier = cc.Identifier;
+                    //Get the status for the plate found on EB
+                    string SameSourceStatus = cc.Status.ToString();
+
 
                     Serilog.Log.Information("Found a source with the same name   {SameSource}", SameSource.ToString());
 
 
-                    //Get the status for the plate found on EB
-                    string SameSourceStatus = cc.Status.ToString();
+                    Console.WriteLine($"***********    Same Source Name= {SameSource}, Id= {SameSourceIdentifier}, Status= {SameSourceStatus} " + Environment.NewLine);
+
+
 
 
                     //If plate not currently in the ReadyDestinationsForEB array and is either FINISHED or PENDING - 
@@ -318,28 +329,49 @@ namespace Biosero.Scripting
                 }
             }
 
-
             //format EB operations list to a comma separated list
             string AllEBOperationsForOrder = string.Join(",", EBRequiredOperations);
 
-            Console.WriteLine($"***********  These are the required EB operations for the order: {AllEBOperationsForOrder} " + Environment.NewLine);
+
+            string FirstEBOperation = EBRequiredOperations[0];
+            string EBWorkType = "";
+
+            if (FirstEBOperation == "Serialise" || FirstEBOperation == "Bravo")
+            {
+                EBWorkType = "Bravo";
+            }
+            else if (FirstEBOperation == "Echo")
+            {
+                EBWorkType = "Echo";
+            }
+
+
+
+            //Assign to Required EB work to global variable EBOrderWorkInitiates
+            await context.AddOrUpdateGlobalVariableAsync("EBOrderWorkInitiates", EBWorkType);
 
             //Assign to Required EB work to global variable EBOrderWorkType
             await context.AddOrUpdateGlobalVariableAsync("EBOrderWorkType", AllEBOperationsForOrder);
+
+
+            Console.WriteLine($"***********  This is the first instrument path needed for the order: {EBWorkType} " + Environment.NewLine);
+            Console.WriteLine($"***********  These are the required EB operations for the order: {AllEBOperationsForOrder} " + Environment.NewLine);
+
+
 
             Serilog.Log.Information("List all the plates that are need in EB from  CP for order  {RequestedOrder}", RequestedOrder.ToString());
 
             // Formatall found plates array to a string
             string AllEBDestinedSources = string.Join(",", AllDestinationsForOrder);
-            Console.WriteLine($"***********       CheckAllQueuedEBSources: These EB destination plates were found for EB = {AllEBDestinedSources} " + Environment.NewLine);
+            Console.WriteLine($"***********       CheckAllQueuedEBSources: These EB destination plates were found for EB: {AllEBDestinedSources} " + Environment.NewLine);
 
             //Count total EB based plates
             int TotalEBDestinedSources = AllDestinationsForOrder.Count;
-            Console.WriteLine($"***********       CheckAllQueuedEBSources: A Total of = {TotalEBDestinedSources} sources were found for the  EB workstation" + Environment.NewLine);
+            Console.WriteLine($"***********       CheckAllQueuedEBSources: A Total of {TotalEBDestinedSources} sources were found for the  EB workstation" + Environment.NewLine);
 
 
             string AllQueuedEBDestinedSources = string.Join(",", QueuedDestinationsForOrder);
-            Console.WriteLine($"***********       CheckAllQueuedEBSources: These EB queued plates were found for EB = {AllQueuedEBDestinedSources} " + Environment.NewLine);
+            //    Console.WriteLine($"***********       CheckAllQueuedEBSources: These EB queued plates were found for EB = {AllQueuedEBDestinedSources} " + Environment.NewLine);
 
 
             int TotalEBQueuedDestinedSources = QueuedDestinationsForOrder.Count;
