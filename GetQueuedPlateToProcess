@@ -1,0 +1,109 @@
+#r Roche.LAMA1.dll
+
+using Biosero.DataServices.Client;
+using Biosero.Orchestrator.WorkflowService;
+using Newtonsoft.Json;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Text;
+using System.Linq;
+using Roche.LAMA1;
+using Roche.LAMA1.Models;
+using Roche.LAMA1.MosaicTypes;
+using Biosero.DataServices.RestClient;
+using Biosero.DataModels.Events;
+using Biosero.DataModels.Ordering;
+using Biosero.DataModels.Clients;
+using Biosero.DataModels.Resources;
+using System.Security.Cryptography;
+using System.Collections;
+
+
+namespace Biosero.Scripting
+{
+    public class GetQueuedPlateToProcess
+    {
+
+
+        public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
+        {
+            Console.WriteLine($"***********       Processing of GetQueuedPlateToProcess begins **********" + Environment.NewLine);
+            //Retrieve current global variables value
+            string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
+            string QueuedEBSourcesToBeTransferred = context.GetGlobalVariableValue<string>("All queued EB plates");
+            string EBWorkRequired = context.GetGlobalVariableValue<string>("EBOrderWorkType");
+
+
+
+            string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+
+            IQueryClient _queryClient = new QueryClient(API_BASE_URL);
+            IAccessioningClient _accessioningClient = new AccessioningClient(API_BASE_URL);
+            IEventClient _eventClient = new EventClient(API_BASE_URL);
+
+
+            IdentityHelper _identityHelper;
+
+
+            //Build out and register the root identities (i.e Mosaic Job) if they do not exist
+            _identityHelper = new IdentityHelper(_queryClient, _accessioningClient, _eventClient);
+            _identityHelper.BuildBaseIdentities();
+
+            var sources = _identityHelper.GetSources(RequestedOrder).ToList();
+
+            var destinations = _identityHelper.GetDestinations(RequestedOrder).ToList();
+
+            //Format list of transferred sources to an array
+            string[] QueuedEBSourcesArray = QueuedEBSourcesToBeTransferred.Split(',');
+
+            // Convert the array to a List
+            List<string> EBSourcesList = new List<string>(QueuedEBSourcesArray);
+
+
+
+            //Loop through each of the sources found on the array
+            foreach (string EBSource in QueuedEBSourcesArray)
+            {
+                var a = sources
+                .Where(a => a.Name == EBSource)
+                .FirstOrDefault();
+
+                //Find the source name and priority for each ready plate
+                string SourceName = a.Name;
+                string SourcePriority = a.Priority;
+
+                Console.WriteLine($"***********       The current plate processed is:= {SourceName} " + Environment.NewLine);
+                Console.WriteLine($"***********       EB Work Required:= {EBWorkRequired} " + Environment.NewLine);
+
+                await context.AddOrUpdateGlobalVariableAsync("CurrentSourcePlate", SourceName);
+                // Loop through each member and perform an action
+                /*
+                 * foreach (string EBWork in EBRquiredWorkForPlate)
+                {
+
+                    Console.WriteLine($"***********       The current task for plate {SourceName} is {EBWork} " + Environment.NewLine);
+                    await context.AddOrUpdateGlobalVariableAsync("EBOrderWorkType", EBWork);
+                    
+                }
+                */
+
+                string updatedEBSourceList = string.Join(",", QueuedEBSourcesArray, 1, QueuedEBSourcesArray.Length - 1);
+
+                await context.AddOrUpdateGlobalVariableAsync("Queued EB Plates Count", QueuedEBSourcesArray.Length - 1);
+                await context.AddOrUpdateGlobalVariableAsync("All queued EB plates", updatedEBSourceList);
+
+
+                Console.WriteLine($"***********   New list of EB Plates {updatedEBSourceList} " + Environment.NewLine);
+                Console.WriteLine($"***********   New total EB Plates {SourceName} is {QueuedEBSourcesArray.Length - 1} " + Environment.NewLine);
+
+            }
+
+
+
+        }
+    }
+}
+
+
