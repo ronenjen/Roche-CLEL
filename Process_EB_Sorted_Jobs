@@ -27,16 +27,17 @@ namespace Biosero.Scripting
     public class Process_EB_Sorted_Jobs
     {
 
-
-
-
         public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
         {
             string PrioritisedJobs = context.GetGlobalVariableValue<string>("Prioritised Jobs");
             string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
             string FirstReplicationBarcodes = context.GetGlobalVariableValue<string>("RepOnePlaceholderBarcodes");
             string SecondReplicationBarcodes = context.GetGlobalVariableValue<string>("RepTwoPlaceholderBarcodes");
-            Serilog.Log.Information("FirstReplicationBarcodes= {FirstReplicationBarcodes}", FirstReplicationBarcodes.ToString());
+
+            int PriorityId = 0;
+
+            Serilog.Log.Information("Barcodes for first replication: = {FirstReplicationBarcodes}", FirstReplicationBarcodes.ToString());
+            Serilog.Log.Information("Barcodes for second replication: = {SecondReplicationBarcodes}", SecondReplicationBarcodes.ToString());
 
             //instantiate LAMA1 objects
 
@@ -67,21 +68,17 @@ namespace Biosero.Scripting
 
             List<string> JobReplicationOneBarcodes = new List<string>();
             List<string> JobReplicationTwoBarcodes = new List<string>();
-
-
             List<string> PrioritisedJobsList = PrioritisedJobs.Split(',').ToList();
 
             // Get highest priority job
             string PrioritisedJobId = PrioritisedJobsList[0];
 
-            Serilog.Log.Information("job= {job}", PrioritisedJobId.ToString());
+            Serilog.Log.Information("The current highest priority job:= {job}", PrioritisedJobId.ToString());
 
             //Retrienve job name and identifier from Identities dataset
             var i = jobs
             .Where(x => x.Properties.GetValue<string>("JobId") == PrioritisedJobId)
             .FirstOrDefault();
-
-
 
 
             string JobName = i.Name;
@@ -90,16 +87,15 @@ namespace Biosero.Scripting
             string Priority = i.Priority;
             string JobFragment = i.WorkflowFragment;
 
-            //Retrieve destination details from identities dataset
+            await context.AddOrUpdateGlobalVariableAsync("Job Number", CurrentJobId);
+
+            //Retrieve destination details from identities dataset for the highest priority job
             var a = destinations
             .Where(a => a.Properties.GetValue<string>("JobId") == PrioritisedJobId)
             .FirstOrDefault();
 
+            //Find the labware type for the destinaiton plate
             string AssayLabwareType = a.CommonName;
-
-
-
-            int PriorityId = 0;
 
             switch (Priority)
             {
@@ -114,27 +110,32 @@ namespace Biosero.Scripting
                     break;
             }
 
-            Serilog.Log.Information("JobName= {JobName}", JobName.ToString());
-            Serilog.Log.Information("JobIdentifier= {JobIdentifier}", JobIdentifier.ToString());
-            Serilog.Log.Information("Priority= {Priority}", PriorityId.ToString());
+
+
+            Serilog.Log.Information("The current job is:= {JobName}", JobName.ToString());
+            Serilog.Log.Information("The current job Idnetities identifier is:= {JobIdentifier}", JobIdentifier.ToString());
+            Serilog.Log.Information("The current job priority is:= {Priority}", PriorityId.ToString());
 
             if (JobFragment.Contains("Replicate"))
             {
-                Serilog.Log.Information("JobFragment= Replicate");
+                Serilog.Log.Information("Currently performing operation = Replicate");
                 await context.AddOrUpdateGlobalVariableAsync("Job Fragment", "Replicate");
             }
             else
             {
-                Serilog.Log.Information("JobFragment= CherryPick");
+                Serilog.Log.Information("Currently performing operation = CherryPick");
                 await context.AddOrUpdateGlobalVariableAsync("Job Fragment", "Cherry Pick");
             }
 
-
+            //loop through all destinaitons for the order
             foreach (var dest in destinations)
             {
+                //Retrieve plate name and job
                 string currentDestName = dest.Name;
                 int currentDestJob = dest.JobId;
 
+                // If the found plate is in the first rplication list, is not yet in the replicaiton barcodes array and is part of the current high priority job -
+                // Add it to the replication barcodes array
                 if (FirstReplicationBarcodes.Contains(currentDestName) && (!JobReplicationOneBarcodes.Contains(currentDestName)) && (currentDestJob == CurrentJobId))
                 {
                     Serilog.Log.Information("found a dest= {currentDestName}", currentDestName.ToString());
@@ -142,17 +143,14 @@ namespace Biosero.Scripting
 
                 }
             }
+
+            // Format the replication one barcodes array to a string AllBarcodesRequiredForReplicteOne
             string AllBarcodesRequiredForReplicteOne = String.Join(", ", JobReplicationOneBarcodes);
 
-
-
-            await context.AddOrUpdateGlobalVariableAsync("ReplicateOneBarcodes", AllBarcodesRequiredForReplicteOne);
-            await context.AddOrUpdateGlobalVariableAsync("Job Number", Int32.Parse(PrioritisedJobId));
-            await context.AddOrUpdateGlobalVariableAsync("Job Priority", PriorityId.ToString());
-
-
+            //remove the current job form the list of Job IDs
             string result = string.Join(",", PrioritisedJobs.Split(',').Where(s => s != PrioritisedJobId));
 
+            // Update global variable list of jobs 
             await context.AddOrUpdateGlobalVariableAsync("Prioritised Jobs", result);
 
         }
