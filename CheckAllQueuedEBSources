@@ -64,6 +64,7 @@ namespace Biosero.Scripting
             string EBOperationThree = "";
             string EBOperationFour = "";
             string EBOperationFive = "";
+            string SerialiseDestinationId = "";
 
             string FirstReplicationInstrument = "";
             bool SerialiseOperationRequired = false;
@@ -81,6 +82,8 @@ namespace Biosero.Scripting
             List<string> ReadyDestinationsForEB = new List<string>();
             List<string> TransportedSourcesForEB = new List<string>();
             List<string> EBRequiredOperations = new List<string>();
+            List<string> AllQueuedSources = new List<string>();
+
 
             //Add all required barcodes to a dedicated comma separated list
             List<string> CPToEBBarcodes = CPSourcesForEB.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries).ToList();
@@ -165,9 +168,14 @@ namespace Biosero.Scripting
                             EBRequiredOperations.Add(EBOperationTwo);
                         }
 
+                        if (EBOperationTwo == "Serialise")
+                        {
+                             SerialiseDestinationId = SecondDestID;
+                        }
+
                         //Get the next destination plate after the cherry pick operation
                         var ThirdDestination = destinations
-                        .Where(x => x.ParentIdentifier == SecondDestID)
+                        .Where(x => x.ParentIdentifier == SerialiseDestinationId)
                         .FirstOrDefault();
 
                         if ((ThirdDestination != null) && (EBOperationThree == ""))
@@ -196,7 +204,7 @@ namespace Biosero.Scripting
 
                             //Get the next destination plate after the cherry pick operation
                             var FourthDestination = destinations
-                            .Where(x => x.ParentIdentifier == ThirdDestID)
+                            .Where(x => x.ParentIdentifier == SerialiseDestinationId)
                             .FirstOrDefault();
 
                             if ((FourthDestination != null) && (EBOperationFour == ""))
@@ -225,7 +233,7 @@ namespace Biosero.Scripting
 
                                 //Get the next destination plate after the cherry pick operation
                                 var FifthDestination = destinations
-                                .Where(x => x.ParentIdentifier == FourthDestID)
+                                .Where(x => x.ParentIdentifier == SerialiseDestinationId)
                                 .FirstOrDefault();
 
                                 if ((FifthDestination != null) && (EBOperationFive == ""))
@@ -289,16 +297,16 @@ namespace Biosero.Scripting
                     .Where(x => x.Name == DestName)
                     .FirstOrDefault();
 
-                    string SameSource = cc.Name;
+                    string SameSourceName = cc.Name;
                     string SameSourceIdentifier = cc.Identifier;
                     //Get the status for the plate found on EB
                     string SameSourceStatus = cc.Status.ToString();
 
 
-                    Serilog.Log.Information("Found a source with the same name   {SameSource}", SameSource.ToString());
+                    Serilog.Log.Information("Found a source with the same name {SameSource}", SameSourceName.ToString());
 
 
-                    Console.WriteLine($"***********    Same Source Name= {SameSource}, Id= {SameSourceIdentifier}, Status= {SameSourceStatus} " + Environment.NewLine);
+                    Console.WriteLine($"***********  Source barcode= {SameSourceName}, Source Id= {SameSourceIdentifier}, Source Status= {SameSourceStatus} " + Environment.NewLine);
 
 
 
@@ -306,25 +314,26 @@ namespace Biosero.Scripting
                     //If plate not currently in the ReadyDestinationsForEB array and is either FINISHED or PENDING - 
                     if ((!ReadyDestinationsForEB.Contains(DestName)) && (DestState == "Finished") && (SameSourceStatus == "Pending"))
                     {
-                        Console.WriteLine($"***********       Got One plate in Ready Destinations!= {DestName} " + Environment.NewLine);
+                        int SameSourceJobID = cc.JobId;
+                        Console.WriteLine($"***********  CP destination plate {DestName} has finished - setting the child plate (source) to status of QUEUED " + Environment.NewLine);
                         // Serilog.Log.Information("Got One plate!= {DestName}", DestName.ToString());
 
                         ReadyDestinationsForEB.Add(DestName);
 
+                        //    var currentStatus = SourceIndentityState;
+                        cc.Properties.SetValue("Status", "Queued");
+                        _identityHelper.Register(cc, SameSourceJobID, RequestedOrder);
+
+                        //Add source to the list of queued sources
+                        AllQueuedSources.Add(SameSourceName);
+
+
+
                         DestLabwareType = dest.CommonName.ToString();
 
-                        Console.WriteLine($"***********       CheckAllQueuedEBSources: Adding Plate to ReadyDestinatonForEB, SameSource = {SameSource}, ReadyDestinationsForEB.Count = {ReadyDestinationsForEB.Count} " + Environment.NewLine);
+                        Console.WriteLine($"***********       CheckAllQueuedEBSources: Adding Plate to ReadyDestinatonForEB array, total finished CP plates: {ReadyDestinationsForEB.Count} " + Environment.NewLine);
                     }
-                    if ((!TransportedSourcesForEB.Contains(DestName)) && (DestState == "Finished") && (SameSourceStatus != "Pending"))
-                    {
-                        Serilog.Log.Information("Looking for any transported plates for Order {RequestedOrder}", RequestedOrder.ToString());
-
-                        Serilog.Log.Information("This one was sent= {DestName}", DestName.ToString());
-
-                        TransportedSourcesForEB.Add(DestName);
-
-                        Console.WriteLine($"***********       CheckAllQueuedEBSources: Adding Plate to TransportedSourcesForEB , SameSource = {SameSource}, TransportedSourcesForEB.Count = {TransportedSourcesForEB.Count} " + Environment.NewLine);
-                    }
+     
 
                 }
             }
@@ -332,31 +341,39 @@ namespace Biosero.Scripting
             //format EB operations list to a comma separated list
             string AllEBOperationsForOrder = string.Join(",", EBRequiredOperations);
 
+            //format EB operations list to a comma separated list
+        //    string AllQueuedPlatesFromCP = string.Join(",", AllQueuedSources);
+
 
             string FirstEBOperation = EBRequiredOperations[0];
-            string EBWorkType = "";
+            string EBWorkInitiates = "";
 
             if (FirstEBOperation == "Serialise" || FirstEBOperation == "Bravo")
             {
-                EBWorkType = "Bravo";
+                EBWorkInitiates = "Bravo";
             }
             else if (FirstEBOperation == "Echo")
             {
-                EBWorkType = "Echo";
+                EBWorkInitiates = "Echo";
             }
 
 
 
             //Assign to Required EB work to global variable EBOrderWorkInitiates
-            await context.AddOrUpdateGlobalVariableAsync("EBOrderWorkInitiates", EBWorkType);
+            await context.AddOrUpdateGlobalVariableAsync("EBOrderWorkInitiates", EBWorkInitiates);
+            await context.AddOrUpdateGlobalVariableAsync("Queued EB Plates Count", AllQueuedSources.Count);
+          //  await context.AddOrUpdateGlobalVariableAsync("All queued EB plates", AllQueuedPlatesFromCP);
+
+         //   Console.WriteLine($"*********** The sources set to queued from CP: {AllQueuedPlatesFromCP} " + Environment.NewLine);
 
             //Assign to Required EB work to global variable EBOrderWorkType
             await context.AddOrUpdateGlobalVariableAsync("EBOrderWorkType", AllEBOperationsForOrder);
 
 
-            Console.WriteLine($"***********  This is the first instrument path needed for the order: {EBWorkType} " + Environment.NewLine);
+            Console.WriteLine($"***********  This is the first instrument path needed for the order: {EBWorkInitiates} " + Environment.NewLine);
             Console.WriteLine($"***********  These are the required EB operations for the order: {AllEBOperationsForOrder} " + Environment.NewLine);
 
+       //     Console.WriteLine($"***********  TOTAL QUEUED PLATES {AllQueuedSources.Count} " + Environment.NewLine);
 
 
             Serilog.Log.Information("List all the plates that are need in EB from  CP for order  {RequestedOrder}", RequestedOrder.ToString());
@@ -374,14 +391,14 @@ namespace Biosero.Scripting
             //    Console.WriteLine($"***********       CheckAllQueuedEBSources: These EB queued plates were found for EB = {AllQueuedEBDestinedSources} " + Environment.NewLine);
 
 
-            int TotalEBQueuedDestinedSources = QueuedDestinationsForOrder.Count;
-            Console.WriteLine($"***********       CheckAllQueuedEBSources: A Total of = {TotalEBQueuedDestinedSources} EB queued were found for the EB workstation" + Environment.NewLine);
+         //   int TotalEBQueuedDestinedSources = QueuedDestinationsForOrder.Count;
+         //   Console.WriteLine($"***********       CheckAllQueuedEBSources: A Total of = {TotalEBQueuedDestinedSources} EB queued were found for the EB workstation" + Environment.NewLine);
 
 
             string AllEBReadySources = "";
             int TotalEBReadySources = 0;
-            string AllEBTransportedSources = "";
-            int TotalEBTransportedSources = 0;
+            //  string AllEBTransportedSources = "";
+            //  int TotalEBTransportedSources = 0;
 
 
             //If at least one plate on EB is rteady - Retrieve list of plates and count
@@ -399,26 +416,20 @@ namespace Biosero.Scripting
             Console.WriteLine($"***********        A Total of = {TotalEBReadySources} plate were ready to be sent to the  EB workstation" + Environment.NewLine);
 
 
-            //If at least one plate on EB was transported - Retrieve list of plates and count
-            if (TransportedSourcesForEB.Count() > 0)
-            {
-                AllEBTransportedSources = string.Join(",", TransportedSourcesForEB);
-                TotalEBTransportedSources = TransportedSourcesForEB.Count;
-            }
-            else
-            {
-                AllEBTransportedSources = "";
-                TotalEBTransportedSources = 0;
-            }
-            Console.WriteLine($"***********       These plates were transported= {AllEBTransportedSources} to the EB workstation" + Environment.NewLine);
-            Console.WriteLine($"***********        A Total of = {TotalEBTransportedSources} were transported to the EB workstation" + Environment.NewLine);
-
-
-            await context.AddOrUpdateGlobalVariableAsync("TotalEBTransportedSources", TotalEBTransportedSources);
-            await context.AddOrUpdateGlobalVariableAsync("TotalEBQueuedDestinedSources", TotalEBQueuedDestinedSources);
+         //   await context.AddOrUpdateGlobalVariableAsync("TotalEBQueuedDestinedSources", TotalEBQueuedDestinedSources);
             await context.AddOrUpdateGlobalVariableAsync("EBSourcesToBeTransferred", AllEBReadySources);
             await context.AddOrUpdateGlobalVariableAsync("TotalEBReadySources", TotalEBReadySources);
             await context.AddOrUpdateGlobalVariableAsync("EBRempSourceLabwareType", DestLabwareType);
+
+
+            Console.WriteLine($"******EBOrderWorkInitiates is here: {EBWorkInitiates} " + Environment.NewLine);
+          //  Console.WriteLine($"******Queued EB Plates Count is here: {AllQueuedSources.Count} " + Environment.NewLine);
+          //  Console.WriteLine($"******All queued EB plates: {AllQueuedPlatesFromCP} " + Environment.NewLine);
+            Console.WriteLine($"******EBOrderWorkType: {AllEBOperationsForOrder} " + Environment.NewLine);
+           // Console.WriteLine($"******TotalEBQueuedDestinedSources is here: {TotalEBQueuedDestinedSources} " + Environment.NewLine);
+            Console.WriteLine($"******EBSourcesToBeTransferred is here: {AllEBReadySources} " + Environment.NewLine);
+            Console.WriteLine($"******TotalEBReadySources is here: {TotalEBReadySources} " + Environment.NewLine);
+            Console.WriteLine($"******EBRempSourceLabwareType is here: {DestLabwareType} " + Environment.NewLine);
 
         }
 
