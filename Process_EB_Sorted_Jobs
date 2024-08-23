@@ -142,16 +142,47 @@ namespace Biosero.Scripting
                     JobReplicationOneBarcodes.Add(currentDestName);
 
                 }
+
+                // If the found plate is in the second rplication list, is not yet in the replicaiton barcodes array and is part of the current high priority job -
+                // Add it to the replication barcodes array
+                if (SecondReplicationBarcodes.Contains(currentDestName) && (!JobReplicationTwoBarcodes.Contains(currentDestName)) && (currentDestJob == CurrentJobId))
+                {
+                    Serilog.Log.Information("found a dest= {currentDestName}", currentDestName.ToString());
+                    JobReplicationTwoBarcodes.Add(currentDestName);
+
+                }
             }
 
             // Format the replication one barcodes array to a string AllBarcodesRequiredForReplicteOne
             string AllBarcodesRequiredForReplicteOne = String.Join(", ", JobReplicationOneBarcodes);
+
+            // Format the replication two barcodes array to a string AllBarcodesRequiredForReplicteTwo
+            string AllBarcodesRequiredForReplicteTwo = String.Join(", ", JobReplicationTwoBarcodes);
 
             //remove the current job form the list of Job IDs
             string result = string.Join(",", PrioritisedJobs.Split(',').Where(s => s != PrioritisedJobId));
 
             // Update global variable list of jobs 
             await context.AddOrUpdateGlobalVariableAsync("Prioritised Jobs", result);
+
+            // Combine both strings into one to loop through all barcodes
+            string CombinedBarcodes = AllBarcodesRequiredForReplicteOne + ", " + AllBarcodesRequiredForReplicteTwo;
+
+            // Split the combined string into an array of barcodes
+            string[] allBarcodesArray = CombinedBarcodes.Split(new[] { ", " }, StringSplitOptions.RemoveEmptyEntries);
+
+            // Loop through each member of the array
+            foreach (string barcode in allBarcodesArray)
+            {
+                var cc = destinations
+                .Where(x => x.Name == barcode)
+                .FirstOrDefault();
+
+                int SourceJobID = cc.JobId;
+
+                cc.Properties.SetValue("Status", "Queued");
+                _identityHelper.Register(cc, SourceJobID, RequestedOrder);
+            }
 
         }
 
