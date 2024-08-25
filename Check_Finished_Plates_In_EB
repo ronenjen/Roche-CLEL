@@ -1,0 +1,133 @@
+#r Roche.LAMA1.dll
+
+
+/*
+Script written by Ronen Peleg (ronenpeleg@biosero.com)
+
+Description:
+Initial script to determine the type of order jobs required to be processed and their contents.
+The script also populates various required variables in dataservices in down the line processes
+*/
+
+
+
+
+using Biosero.DataServices.Client;
+using Biosero.Orchestrator.WorkflowService;
+using Newtonsoft.Json;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Text;
+using System.Linq;
+using Roche.LAMA1;
+using Roche.LAMA1.Models;
+using Roche.LAMA1.MosaicTypes;
+using Biosero.DataServices.RestClient;
+using Biosero.DataModels.Events;
+using Biosero.DataModels.Ordering;
+using Biosero.DataModels.Clients;
+using Biosero.DataModels.Resources;
+using System.Security.Cryptography;
+using System.Collections;
+
+
+namespace Biosero.Scripting
+{
+    public class Check_Finished_Plates_In_EB
+    {
+        public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
+        {
+
+            // Boolean variable determining if the first workflow should process Racks or Crash plates. Both set to FALSE initially.
+            // it is not expected for a job to have bothrequired
+            await context.AddOrUpdateGlobalVariableAsync("EB Plates Ready", false);
+
+
+            // Retrieve order ID ran
+            string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
+
+            bool AreBothEqual = false;
+            int CompletedPlates = 0;
+
+
+
+            // connnect to the DS server, declare query, assecssioning and event clients for the URL
+            string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+            IQueryClient _queryClient = new QueryClient(API_BASE_URL);
+            IAccessioningClient _accessioningClient = new AccessioningClient(API_BASE_URL);
+            IEventClient _eventClient = new EventClient(API_BASE_URL);
+
+            IdentityHelper _identityHelper;
+
+            //Build out and register the root identities (i.e Mosaic Job) if they do not exist
+            _identityHelper = new IdentityHelper(_queryClient, _accessioningClient, _eventClient);
+            _identityHelper.BuildBaseIdentities();
+
+
+
+
+            var orders = await client.GetExecutingOrdersAsync();
+
+            orders = orders.ToArray();
+
+            foreach (var order in orders)
+            {
+                //Get all the destinations associated with this order
+                var destinations = _identityHelper.GetDestinations(RequestedOrder).ToList();
+                var sources = _identityHelper.GetSources(RequestedOrder).ToList();
+
+
+                foreach (var dest in destinations)
+                {
+                    string DestName = dest.Name;
+                    string DestStatus = dest.Status.ToString();
+
+
+                    var cc = sources
+                    .Where(x => x.Name == DestName)
+                    .FirstOrDefault();
+
+
+                    if (cc != null)
+                    {
+                        string RelatedSourceStatus = cc.Status.ToString();
+
+
+                        if ((DestStatus == "Finished") && (RelatedSourceStatus != "Pending"))
+                        {
+
+                            await context.AddOrUpdateGlobalVariableAsync("EB Plates Ready", true);
+                        }
+                    }
+
+                }
+
+
+                foreach (var source in sources)
+                {
+                    string SrcName = source.Name;
+                    string SrcStatus = source.Status.ToString();
+
+                    if (SrcStatus == "Finished")
+                    {
+
+                        await context.AddOrUpdateGlobalVariableAsync("EB Plates Ready", true);
+                    }
+                }
+
+
+
+
+
+            }
+
+
+
+
+        }
+    }
+}
+
+
