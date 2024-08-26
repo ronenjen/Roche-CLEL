@@ -65,7 +65,7 @@ namespace Biosero.Scripting
             string EBOperationFour = "";
             string EBOperationFive = "";
             string SerialiseDestinationId = "";
-
+            string NewStatusForSource = "";
             string FirstReplicationInstrument = "";
             bool SerialiseOperationRequired = false;
 
@@ -80,6 +80,7 @@ namespace Biosero.Scripting
             List<string> AllDestinationsForOrder = new List<string>();
             List<string> QueuedDestinationsForOrder = new List<string>();
             List<string> ReadyDestinationsForEB = new List<string>();
+            List<string> ReadyDestinationsIDsForEB = new List<string>();
             List<string> TransportedSourcesForEB = new List<string>();
             List<string> EBRequiredOperations = new List<string>();
             List<string> AllQueuedSources = new List<string>();
@@ -114,29 +115,21 @@ namespace Biosero.Scripting
 
 
                 bool isFirstOperation = string.IsNullOrWhiteSpace(dest.ParentIdentifier);
-                //     string DestParentIdentifier = dest.ParentIdentifier != null ? dest.ParentIdentifier.ToString() : "No ParentIdentifier";
 
                 //if the destination is top of the destination tree (so no parent identifier)
                 if ((isFirstOperation) && (EBOperationOne == ""))
                 {
                     EBOperationOne = DestOperationType;
-                    //Add to list of EB operation if not Cherry Pick
-                    if ((EBOperationOne != "CherryPick") && (EBOperationOne == "Replicate"))
+                    // First operation on EB can only be a Serialise or Replicate. Add to EBRequiredOperations. If replicate, also add the transfer volume needed
+
+                    Console.WriteLine($"***********  First Operation for the order: {EBOperationOne} " + Environment.NewLine);
+                    EBRequiredOperations.Add(EBOperationOne);
+
+                    if (EBOperationOne == "Replicate")
                     {
                         string cleanedInputForReplicateOne = DestSampleTransfers.Trim();
                         // Convert the cleaned string to a double
                         double RepOneTransferVolume = double.Parse(cleanedInputForReplicateOne);
-
-                        EBOperationOne = EvaluateDouble(RepOneTransferVolume);
-
-
-                        Console.WriteLine($"***********  First Operation for the order: {EBOperationOne} " + Environment.NewLine);
-                        EBRequiredOperations.Add(EBOperationOne);
-                    }
-                    else if ((EBOperationOne != "CherryPick") && (EBOperationOne != "Replicate"))
-                    {
-                        Console.WriteLine($"***********  First Operation for the order: {EBOperationOne} " + Environment.NewLine);
-                        EBRequiredOperations.Add(EBOperationOne);
                     }
 
                     //Get the next destination plate after the cherry pick operation
@@ -150,32 +143,23 @@ namespace Biosero.Scripting
                         EBOperationTwo = SecondDestination.OperationType.ToString();
                         string SecondDestSampleTransfers = SecondDestination.SampleTransfers.ToString();
 
-                        //Add to list of EB operation if not Cherry Pick
-                        if ((EBOperationTwo != "CherryPick") && (EBOperationTwo == "Replicate"))
+                        //Add to EBRequiredOperations. If Replicate, also add the transfer volume needed
+
+                        if (EBOperationTwo == "Replicate")
                         {
                             string cleanedInputForReplicateTwo = SecondDestSampleTransfers.Trim();
                             // Convert the cleaned string to a double
                             double RepTwoTransferVolume = double.Parse(cleanedInputForReplicateTwo);
 
                             EBOperationTwo = EvaluateDouble(RepTwoTransferVolume);
-
-                            Console.WriteLine($"***********  Second Operation for the order: {EBOperationTwo} " + Environment.NewLine);
-                            EBRequiredOperations.Add(EBOperationTwo);
-                        }
-                        else if (EBOperationTwo != "CherryPick")
-                        {
-                            Console.WriteLine($"***********  Second Operation for the order: {EBOperationTwo} " + Environment.NewLine);
-                            EBRequiredOperations.Add(EBOperationTwo);
                         }
 
-                        if (EBOperationTwo == "Serialise")
-                        {
-                             SerialiseDestinationId = SecondDestID;
-                        }
+                        Console.WriteLine($"***********  Second Operation for the order: {EBOperationTwo} " + Environment.NewLine);
+                        EBRequiredOperations.Add(EBOperationTwo);
 
                         //Get the next destination plate after the cherry pick operation
                         var ThirdDestination = destinations
-                        .Where(x => x.ParentIdentifier == SerialiseDestinationId)
+                        .Where(x => x.ParentIdentifier == SecondDestID)
                         .FirstOrDefault();
 
                         if ((ThirdDestination != null) && (EBOperationThree == ""))
@@ -185,26 +169,22 @@ namespace Biosero.Scripting
                             string ThirdDestSampleTransfers = ThirdDestination.SampleTransfers.ToString();
 
                             //Add to list of EB operation if not Cherry Pick
-                            if ((EBOperationThree != "CherryPick") && (EBOperationThree == "Replicate"))
+                            if (EBOperationThree == "Replicate")
                             {
                                 string cleanedInputForReplicateThree = ThirdDestSampleTransfers.Trim();
                                 // Convert the cleaned string to a double
                                 double RepThreeTransferVolume = double.Parse(cleanedInputForReplicateThree);
 
                                 EBOperationThree = EvaluateDouble(RepThreeTransferVolume);
+                            }
 
-                                Console.WriteLine($"***********  Third Operation for the order: {EBOperationThree} " + Environment.NewLine);
-                                EBRequiredOperations.Add(EBOperationThree);
-                            }
-                            else if (EBOperationThree != "CherryPick")
-                            {
-                                Console.WriteLine($"***********  Third Operation for the order: {EBOperationThree} " + Environment.NewLine);
-                                EBRequiredOperations.Add(EBOperationThree);
-                            }
+                            //Add to EBRequiredOperations. If Replicate, also add the transfer volume needed
+                            Console.WriteLine($"***********  Third Operation for the order: {EBOperationThree} " + Environment.NewLine);
+                            EBRequiredOperations.Add(EBOperationThree);
 
                             //Get the next destination plate after the cherry pick operation
                             var FourthDestination = destinations
-                            .Where(x => x.ParentIdentifier == SerialiseDestinationId)
+                            .Where(x => x.ParentIdentifier == ThirdDestID)
                             .FirstOrDefault();
 
                             if ((FourthDestination != null) && (EBOperationFour == ""))
@@ -221,15 +201,11 @@ namespace Biosero.Scripting
                                     double RepFourTransferVolume = double.Parse(cleanedInputForReplicateFour);
 
                                     EBOperationFour = EvaluateDouble(RepFourTransferVolume);
+                                }
 
-                                    Console.WriteLine($"***********  Fourth Operation for the order: {EBOperationFour} " + Environment.NewLine);
-                                    EBRequiredOperations.Add(EBOperationFour);
-                                }
-                                else if (EBOperationFour != "CherryPick")
-                                {
-                                    Console.WriteLine($"***********  Fourth Operation for the order: {EBOperationFour} " + Environment.NewLine);
-                                    EBRequiredOperations.Add(EBOperationFour);
-                                }
+                                //Add to EBRequiredOperations. If Replicate, also add the transfer volume needed
+                                Console.WriteLine($"***********  Fourth Operation for the order: {EBOperationFour} " + Environment.NewLine);
+                                EBRequiredOperations.Add(EBOperationFour);
 
                                 //Get the next destination plate after the cherry pick operation
                                 var FifthDestination = destinations
@@ -242,6 +218,7 @@ namespace Biosero.Scripting
                                     EBOperationFive = FifthDestination.OperationType.ToString();
                                     string FifthDestSampleTransfers = FifthDestination.SampleTransfers.ToString();
 
+
                                     //Add to list of EB operation if not Cherry Pick
                                     if ((EBOperationFive != "CherryPick") && (EBOperationFive == "Replicate"))
                                     {
@@ -250,15 +227,11 @@ namespace Biosero.Scripting
                                         double RepiveTransferVolume = double.Parse(cleanedInputForReplicateFive);
 
                                         EBOperationFive = EvaluateDouble(RepiveTransferVolume);
+                                    }
 
-                                        Console.WriteLine($"***********  Fifth Operation for the order: {EBOperationFive} " + Environment.NewLine);
-                                        EBRequiredOperations.Add(EBOperationFive);
-                                    }
-                                    else if (EBOperationFive != "CherryPick")
-                                    {
-                                        Console.WriteLine($"***********  Fifth Operation for the order: {EBOperationFive} " + Environment.NewLine);
-                                        EBRequiredOperations.Add(EBOperationFive);
-                                    }
+                                    //Add to EBRequiredOperations. If Replicate, also add the transfer volume needed
+                                    Console.WriteLine($"***********  Fifth Operation for the order: {EBOperationFive} " + Environment.NewLine);
+                                    EBRequiredOperations.Add(EBOperationFive);
                                 }
                             }
                         }
@@ -294,38 +267,165 @@ namespace Biosero.Scripting
 
                     //Get the source plate for the current destination plate name
                     var cc = sources
-                    .Where(x => x.Name == DestName)
+                    .Where(x => x.ParentIdentifier == DestID)
                     .FirstOrDefault();
 
                     string SameSourceName = cc.Name;
-                    string SameSourceIdentifier = cc.Identifier;
-                    //Get the status for the plate found on EB
                     string SameSourceStatus = cc.Status.ToString();
+                    string SameSourceIdentifier = cc.Identifier;
+                    int SourceJobID = cc.JobId;
+                    string SameSourceOperationType = cc.OperationType.ToString();
 
 
-                    Serilog.Log.Information("Found a source with the same name {SameSource}", SameSourceName.ToString());
+                    //Get the source plate for the current destination plate name
+                    var dd = destinations
+                    .Where(x => x.SiblingIdentifier == SameSourceIdentifier)
+                    .FirstOrDefault();
+
+                    string DestinationName = dd.Name;
+                    string DestinationStatus = dd.Status.ToString();
+                    string DestinationIdentifier = dd.Identifier;
+                    int DestinationJobID = dd.JobId;
+                    string DestinationOperationType = dd.OperationType.ToString();
+
+                    //Setting status to QUEUED
+
+                    Console.WriteLine($"***********  8888  {DestinationName} 8888 {DestinationStatus} 8888 {DestOperationType} " + Environment.NewLine);
+
+                    
+                    Console.WriteLine($"***bbbb********  Current state for CP {DestName} is  plate {DestState}  " + Environment.NewLine);
 
 
-                    Console.WriteLine($"***********  Source barcode= {SameSourceName}, Source Id= {SameSourceIdentifier}, Source Status= {SameSourceStatus} " + Environment.NewLine);
+                    if ((DestState == "Pending") && (DestOperationType == "CherryPick"))
+                    {
+                        cc.Properties.SetValue("Status", "Queued");
+                        _identityHelper.Register(cc, SourceJobID, RequestedOrder);
+
+                        Console.WriteLine($"***********  source plate  {SameSourceName} with id {SameSourceIdentifier} and operation {SameSourceOperationType} was set to Queued" + Environment.NewLine);
+
+                        dd.Properties.SetValue("Status", "Queued");
+                        _identityHelper.Register(dd, DestinationJobID, RequestedOrder);
+
+                        Console.WriteLine($"***********  destination plate  {DestinationName} with id {DestinationIdentifier} and operation {DestinationOperationType} was set to Queued" + Environment.NewLine);
 
 
+                        //  string NewSourceIdentifier = dd.Identifier;
 
+                        var ee = sources
+                        .Where(x => x.ParentIdentifier == DestinationIdentifier)
+                        .FirstOrDefault();
+
+                        //  ee.Properties.SetValue("Status", "Queued");
+                        // _identityHelper.Register(ee, DestinationJobID, RequestedOrder);
+
+                        //  string DestinationChildSourceIdentifier = ee.Identifier;
+                        // string DestinationChildSourceOperationType = ee.OperationType.ToString();
+
+                        // Console.WriteLine($"***********  next source  plate {DestinationName} with id {DestinationChildSourceIdentifier} and operation {DestinationChildSourceOperationType} was set to Queued" + Environment.NewLine);
+
+
+                    }
+                    else
+                    {
+                        Console.WriteLine($"****NOTHING TO SEE HERE" + Environment.NewLine);
+
+                    }
+
+
+                    string NextSourceStatus = cc.Status.ToString();
+
+                    Console.WriteLine($"***bbbb********  Current state for CP  {DestName} is plate {DestState}  " + Environment.NewLine);
+
+                    if (NextSourceStatus == "Queued")
+                    {
+                        cc.Properties.SetValue("Status", "Validating");
+                        _identityHelper.Register(cc, SourceJobID, RequestedOrder);
+
+                        NewStatusForSource = cc.Status.ToString();
+
+                        Console.WriteLine($"***********  source plate  {SameSourceName}  with id {SameSourceIdentifier} and operation {SameSourceOperationType}  was set to Validating" + Environment.NewLine);
+
+
+                        dd.Properties.SetValue("Status", "Validating");
+                        _identityHelper.Register(dd, DestinationJobID, RequestedOrder);
+
+                        string NewSourceIdentifier = dd.Identifier;
+
+                        Console.WriteLine($"***********  destination plate  {DestinationName} with id {DestinationIdentifier} and operation {DestinationOperationType}  was set to Validating" + Environment.NewLine);
+
+
+                        var ff = sources
+                        .Where(x => x.ParentIdentifier == NewSourceIdentifier)
+                        .FirstOrDefault();
+
+                        string DestinationChildSourceIdentifier1 = ff.Identifier;
+                        string DestinationChildSourceOperationType1 = ff.OperationType.ToString();
+
+                        //  ff.Properties.SetValue("Status", "Validating");
+                        //  _identityHelper.Register(ff, DestinationJobID, RequestedOrder);
+
+                        //  string ValidatingSourceIdentifier = ff.Identifier;
+
+                        //  Console.WriteLine($"***********  next source  plate {DestinationName} with id {DestinationChildSourceIdentifier1} and operation {DestinationChildSourceOperationType1} was set to Validating" + Environment.NewLine);
+                    }
 
                     //If plate not currently in the ReadyDestinationsForEB array and is either FINISHED or PENDING - 
-                    if ((!ReadyDestinationsForEB.Contains(DestName)) && (DestState == "Finished") && (SameSourceStatus == "Pending"))
+
+                    Console.WriteLine($"***bbbb********  Current state for CP plate {DestName} is {DestState}  " + Environment.NewLine);
+
+
+
+                    if ((!ReadyDestinationsForEB.Contains(DestName)) && (DestState == "Finished") && (NewStatusForSource == "Finished"))
                     {
                         int SameSourceJobID = cc.JobId;
                         Console.WriteLine($"***********  CP destination plate {DestName} has finished - setting the child plate (source) to status of QUEUED " + Environment.NewLine);
-                        // Serilog.Log.Information("Got One plate!= {DestName}", DestName.ToString());
+                        // Serilog.Log.Information("Got One plate!= {DestName}", DestName.ToString())7;
 
                         ReadyDestinationsForEB.Add(DestName);
+                        ReadyDestinationsIDsForEB.Add(DestID);
 
                         //    var currentStatus = SourceIndentityState;
-                        cc.Properties.SetValue("Status", "Queued");
+                        cc.Properties.SetValue("Status", "Ready");
                         _identityHelper.Register(cc, SameSourceJobID, RequestedOrder);
+
+                        string FirstIdentifier = cc.Identifier;
 
                         //Add source to the list of queued sources
                         AllQueuedSources.Add(SameSourceName);
+
+
+                        Console.WriteLine($"XXX***********  source plate  {SameSourceName} with identifier {FirstIdentifier} was set to Ready" + Environment.NewLine);
+
+
+
+
+                        dd.Properties.SetValue("Status", "Ready");
+                        _identityHelper.Register(dd, DestinationJobID, RequestedOrder);
+
+                        NewStatusForSource = dd.Status.ToString();
+                        string CurrentDestinationName = dd.Name.ToString();
+                        string CurrentDestinationIdentifier = dd.Identifier;
+
+                        Console.WriteLine($"XXXX***********  destination plate  {CurrentDestinationName} with ID {CurrentDestinationIdentifier} was set to Ready" + Environment.NewLine);
+
+
+                        var ll = sources
+                        .Where(x => x.ParentIdentifier == CurrentDestinationIdentifier)
+                        .FirstOrDefault();
+
+
+                        string CurrentIdentifier = ll.Identifier;
+                        string CurrentName = ll.Name;
+                        int CurrentJobId = dd.JobId;
+                        string CurrentOperationType = ll.OperationType.ToString();
+
+                        //    ll.Properties.SetValue("Status", "Ready");
+                        //    _identityHelper.Register(ll, CurrentJobId, RequestedOrder);
+
+
+
+                        //    Console.WriteLine($"XXXX***********  source  plate  {CurrentName} with ID {CurrentIdentifier} and operation {CurrentOperationType} was set to Ready " + Environment.NewLine);
+
 
 
 
@@ -333,7 +433,10 @@ namespace Biosero.Scripting
 
                         Console.WriteLine($"***********       CheckAllQueuedEBSources: Adding Plate to ReadyDestinatonForEB array, total finished CP plates: {ReadyDestinationsForEB.Count} " + Environment.NewLine);
                     }
-     
+
+
+
+
 
                 }
             }
@@ -342,7 +445,7 @@ namespace Biosero.Scripting
             string AllEBOperationsForOrder = string.Join(",", EBRequiredOperations);
 
             //format EB operations list to a comma separated list
-        //    string AllQueuedPlatesFromCP = string.Join(",", AllQueuedSources);
+            //    string AllQueuedPlatesFromCP = string.Join(",", AllQueuedSources);
 
 
             string FirstEBOperation = EBRequiredOperations[0];
@@ -362,9 +465,9 @@ namespace Biosero.Scripting
             //Assign to Required EB work to global variable EBOrderWorkInitiates
             await context.AddOrUpdateGlobalVariableAsync("EBOrderWorkInitiates", EBWorkInitiates);
             await context.AddOrUpdateGlobalVariableAsync("Queued EB Plates Count", AllQueuedSources.Count);
-          //  await context.AddOrUpdateGlobalVariableAsync("All queued EB plates", AllQueuedPlatesFromCP);
+            //  await context.AddOrUpdateGlobalVariableAsync("All queued EB plates", AllQueuedPlatesFromCP);
 
-         //   Console.WriteLine($"*********** The sources set to queued from CP: {AllQueuedPlatesFromCP} " + Environment.NewLine);
+            //   Console.WriteLine($"*********** The sources set to queued from CP: {AllQueuedPlatesFromCP} " + Environment.NewLine);
 
             //Assign to Required EB work to global variable EBOrderWorkType
             await context.AddOrUpdateGlobalVariableAsync("EBOrderWorkType", AllEBOperationsForOrder);
@@ -373,7 +476,7 @@ namespace Biosero.Scripting
             Console.WriteLine($"***********  This is the first instrument path needed for the order: {EBWorkInitiates} " + Environment.NewLine);
             Console.WriteLine($"***********  These are the required EB operations for the order: {AllEBOperationsForOrder} " + Environment.NewLine);
 
-       //     Console.WriteLine($"***********  TOTAL QUEUED PLATES {AllQueuedSources.Count} " + Environment.NewLine);
+            //     Console.WriteLine($"***********  TOTAL QUEUED PLATES {AllQueuedSources.Count} " + Environment.NewLine);
 
 
             Serilog.Log.Information("List all the plates that are need in EB from  CP for order  {RequestedOrder}", RequestedOrder.ToString());
@@ -391,11 +494,12 @@ namespace Biosero.Scripting
             //    Console.WriteLine($"***********       CheckAllQueuedEBSources: These EB queued plates were found for EB = {AllQueuedEBDestinedSources} " + Environment.NewLine);
 
 
-         //   int TotalEBQueuedDestinedSources = QueuedDestinationsForOrder.Count;
-         //   Console.WriteLine($"***********       CheckAllQueuedEBSources: A Total of = {TotalEBQueuedDestinedSources} EB queued were found for the EB workstation" + Environment.NewLine);
+            //   int TotalEBQueuedDestinedSources = QueuedDestinationsForOrder.Count;
+            //   Console.WriteLine($"***********       CheckAllQueuedEBSources: A Total of = {TotalEBQueuedDestinedSources} EB queued were found for the EB workstation" + Environment.NewLine);
 
 
             string AllEBReadySources = "";
+            string AllEBReadySourcesIDs = "";
             int TotalEBReadySources = 0;
             //  string AllEBTransportedSources = "";
             //  int TotalEBTransportedSources = 0;
@@ -405,6 +509,7 @@ namespace Biosero.Scripting
             if (ReadyDestinationsForEB.Count() > 0)
             {
                 AllEBReadySources = string.Join(",", ReadyDestinationsForEB);
+                AllEBReadySourcesIDs = string.Join(",", ReadyDestinationsIDsForEB);
                 TotalEBReadySources = ReadyDestinationsForEB.Count;
             }
             else
@@ -416,17 +521,18 @@ namespace Biosero.Scripting
             Console.WriteLine($"***********        A Total of = {TotalEBReadySources} plate were ready to be sent to the  EB workstation" + Environment.NewLine);
 
 
-         //   await context.AddOrUpdateGlobalVariableAsync("TotalEBQueuedDestinedSources", TotalEBQueuedDestinedSources);
+            //   await context.AddOrUpdateGlobalVariableAsync("TotalEBQueuedDestinedSources", TotalEBQueuedDestinedSources);
             await context.AddOrUpdateGlobalVariableAsync("EBSourcesToBeTransferred", AllEBReadySources);
+            await context.AddOrUpdateGlobalVariableAsync("EBSourceIDsToBeTransferred", AllEBReadySourcesIDs);
             await context.AddOrUpdateGlobalVariableAsync("TotalEBReadySources", TotalEBReadySources);
             await context.AddOrUpdateGlobalVariableAsync("EBRempSourceLabwareType", DestLabwareType);
 
 
             Console.WriteLine($"******EBOrderWorkInitiates is here: {EBWorkInitiates} " + Environment.NewLine);
-          //  Console.WriteLine($"******Queued EB Plates Count is here: {AllQueuedSources.Count} " + Environment.NewLine);
-          //  Console.WriteLine($"******All queued EB plates: {AllQueuedPlatesFromCP} " + Environment.NewLine);
+            //  Console.WriteLine($"******Queued EB Plates Count is here: {AllQueuedSources.Count} " + Environment.NewLine);
+            //  Console.WriteLine($"******All queued EB plates: {AllQueuedPlatesFromCP} " + Environment.NewLine);
             Console.WriteLine($"******EBOrderWorkType: {AllEBOperationsForOrder} " + Environment.NewLine);
-           // Console.WriteLine($"******TotalEBQueuedDestinedSources is here: {TotalEBQueuedDestinedSources} " + Environment.NewLine);
+            // Console.WriteLine($"******TotalEBQueuedDestinedSources is here: {TotalEBQueuedDestinedSources} " + Environment.NewLine);
             Console.WriteLine($"******EBSourcesToBeTransferred is here: {AllEBReadySources} " + Environment.NewLine);
             Console.WriteLine($"******TotalEBReadySources is here: {TotalEBReadySources} " + Environment.NewLine);
             Console.WriteLine($"******EBRempSourceLabwareType is here: {DestLabwareType} " + Environment.NewLine);
