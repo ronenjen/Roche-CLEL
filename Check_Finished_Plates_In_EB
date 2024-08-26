@@ -31,6 +31,7 @@ using Biosero.DataModels.Clients;
 using Biosero.DataModels.Resources;
 using System.Security.Cryptography;
 using System.Collections;
+using System.Numerics;
 
 
 namespace Biosero.Scripting
@@ -40,16 +41,10 @@ namespace Biosero.Scripting
         public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
         {
 
-            // Boolean variable determining if the first workflow should process Racks or Crash plates. Both set to FALSE initially.
-            // it is not expected for a job to have bothrequired
-            await context.AddOrUpdateGlobalVariableAsync("EB Plates Ready", false);
-
-
-            // Retrieve order ID ran
             string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
 
-            bool AreBothEqual = false;
-            int CompletedPlates = 0;
+            string FinishedDestinationPlatesForIOC = "";
+            string FinishedSourcePlatesForIOC = "";
 
 
 
@@ -65,66 +60,163 @@ namespace Biosero.Scripting
             _identityHelper = new IdentityHelper(_queryClient, _accessioningClient, _eventClient);
             _identityHelper.BuildBaseIdentities();
 
+            //Get all the sources associated with this order
+            var sources = _identityHelper.GetSources(RequestedOrder).ToList();
+            //Get all the Sources associated with this order
+            var destinations = _identityHelper.GetDestinations(RequestedOrder).ToList();
+            //Get all the jobs
+            var jobs = _identityHelper.GetJobs(RequestedOrder).ToList();
 
 
 
-            var orders = await client.GetExecutingOrdersAsync();
+            List<string> AllDestinationPlates = new List<string>();
+            List<string> AllCompletedDestinationPlates = new List<string>();
+            List<string> AllSourcePlates = new List<string>();
+            List<string> AllCompletedSourcePlates = new List<string>();
 
-            orders = orders.ToArray();
+            int TotalDestinationPlates = 0;
+            int TotalCompletedDestinationPlates = 0;
+            int TotalSourcePlates = 0;
+            int TotalCompletedSourcePlates = 0;
 
-            foreach (var order in orders)
+            foreach (var destination in destinations)
             {
-                //Get all the destinations associated with this order
-                var destinations = _identityHelper.GetDestinations(RequestedOrder).ToList();
-                var sources = _identityHelper.GetSources(RequestedOrder).ToList();
+
+                // Each dest should be set to pending, queued, validating, ready
+                // compare the list of non completed dest to the list of all plates - if different set Destination EB Plates Not Finished to True
+                string DestName = destination.Name;
+                string DestStatus = destination.Status.ToString();
+                string DestId = destination.Identifier.ToString();
 
 
-                foreach (var dest in destinations)
+                if (!AllDestinationPlates.Contains(DestName))
                 {
-                    string DestName = dest.Name;
-                    string DestStatus = dest.Status.ToString();
+                    AllDestinationPlates.Add(DestName);
+                }
 
+                if (DestStatus == "Completed")
+                {
 
-                    var cc = sources
-                    .Where(x => x.Name == DestName)
+                    var b = sources
+                    .Where(x => x.ParentIdentifier == DestId)
                     .FirstOrDefault();
 
-
-                    if (cc != null)
+                    if (b == null)
                     {
-                        string RelatedSourceStatus = cc.Status.ToString();
-
-
-                        if ((DestStatus == "Finished") && (RelatedSourceStatus != "Pending"))
+                        if (!AllCompletedDestinationPlates.Contains(DestName))
                         {
-
-                            await context.AddOrUpdateGlobalVariableAsync("EB Plates Ready", true);
+                            AllCompletedDestinationPlates.Add(DestName);
                         }
+
+
+
+                        // Check if the string is not empty before adding a comma
+                        if (!string.IsNullOrEmpty(FinishedDestinationPlatesForIOC))
+                        {
+                            FinishedDestinationPlatesForIOC += ", ";
+                        }
+
+                        // Add the current plate to the string
+                        FinishedDestinationPlatesForIOC += DestName;
                     }
 
                 }
-
-
-                foreach (var source in sources)
-                {
-                    string SrcName = source.Name;
-                    string SrcStatus = source.Status.ToString();
-
-                    if (SrcStatus == "Finished")
-                    {
-
-                        await context.AddOrUpdateGlobalVariableAsync("EB Plates Ready", true);
-                    }
-                }
-
-
-
-
-
             }
 
 
+            TotalDestinationPlates = AllDestinationPlates.Count();
+            TotalCompletedDestinationPlates = AllCompletedDestinationPlates.Count();
 
+            if (TotalCompletedDestinationPlates != TotalDestinationPlates)
+            {
+                await context.AddOrUpdateGlobalVariableAsync("Destination EB Plates Not Finished", true);
+            }
+            
+
+
+            await context.AddOrUpdateGlobalVariableAsync("Finished EB Destination Plates", FinishedDestinationPlatesForIOC);
+
+
+            string SDestinationsList = String.Join(", ", AllDestinationPlates);
+
+
+            Console.WriteLine($" Destination plates  {SDestinationsList} need returning to the IOC " + Environment.NewLine);
+            Console.WriteLine($" Destination plates  {FinishedDestinationPlatesForIOC} were set to finished in the list " + Environment.NewLine);
+
+            foreach (var source in sources)
+            {
+                // Each source should be set to pending, queued, validating, ready
+                // compare the list of non completed sources to the list of all source plates - if different set Source EB Plates Not Finished to True
+
+                string SourceName = source.Name;
+                string SourceStatus = source.Status.ToString();
+                string SourceId = source.Identifier.ToString();
+
+
+                if (!AllSourcePlates.Contains(SourceName))
+                {
+                    AllSourcePlates.Add(SourceName);
+                }
+
+
+                if (SourceStatus == "Completed") 
+                {
+
+
+                    var a = destinations
+                    .Where(x => x.SiblingIdentifier == SourceId)
+                    .FirstOrDefault();
+
+                    string DestStatus2 = a.Status.ToString();
+                    string DestId2 = a.Identifier.ToString();
+
+
+                    if (DestStatus2 == "Completed")
+                    {
+                        var c = sources
+                        .Where(x => x.ParentIdentifier == DestId2)
+                        .FirstOrDefault();
+
+                        if (c == null)
+                        {
+                            if (!AllCompletedSourcePlates.Contains(SourceName))
+                            {
+                                AllCompletedSourcePlates.Add(SourceName);
+                            }
+
+                            // Check if the string is not empty before adding a comma
+                            if (!string.IsNullOrEmpty(FinishedSourcePlatesForIOC))
+                            {
+                                FinishedSourcePlatesForIOC += ", ";
+                            }
+
+                            // Add the current plate to the string
+                            FinishedSourcePlatesForIOC += SourceName;
+                        }
+                    }
+
+                    
+
+                }
+            }
+
+
+            TotalSourcePlates = AllSourcePlates.Count();
+            TotalCompletedSourcePlates = AllCompletedSourcePlates.Count();
+
+            if (TotalCompletedSourcePlates != TotalSourcePlates)
+            {
+                await context.AddOrUpdateGlobalVariableAsync("Source EB Plates Not Finished", true);
+            }
+
+            await context.AddOrUpdateGlobalVariableAsync("Finished EB Source Plates", FinishedSourcePlatesForIOC);
+
+
+            string SourcesList = String.Join(", ", AllSourcePlates);
+
+
+            Console.WriteLine($" Source plates  {SourcesList} need returning to the IOC " + Environment.NewLine);
+            Console.WriteLine($" Source plates  {FinishedSourcePlatesForIOC} were set to finished in the list " + Environment.NewLine);
 
         }
     }
