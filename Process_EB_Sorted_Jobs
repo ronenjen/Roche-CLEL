@@ -168,6 +168,9 @@ namespace Biosero.Scripting
             // Combine both strings into one to loop through all barcodes
             string CombinedBarcodes = AllBarcodesRequiredForReplicteOne + ", " + AllBarcodesRequiredForReplicteTwo;
 
+
+            await context.AddOrUpdateGlobalVariableAsync("All EB Assay Plates", CombinedBarcodes);
+
             // Split the combined string into an array of barcodes
             string[] allBarcodesArray = CombinedBarcodes.Split(new[] { ", " }, StringSplitOptions.RemoveEmptyEntries);
 
@@ -178,11 +181,18 @@ namespace Biosero.Scripting
                 .Where(x => x.Name == barcode)
                 .FirstOrDefault();
 
-                int SourceJobID = cc.JobId;
+                int DestinationJobID = cc.JobId;
+                string DestinationName = cc.Name;
 
                 cc.Properties.SetValue("Status", "Queued");
-                _identityHelper.Register(cc, SourceJobID, RequestedOrder);
+                _identityHelper.Register(cc, DestinationJobID, RequestedOrder);
+                Console.WriteLine($"***********  Destinaiton plate {DestinationName} was set to status QUEUED" + Environment.NewLine);
             }
+
+
+
+
+
 
         }
 
