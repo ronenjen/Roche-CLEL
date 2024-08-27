@@ -68,13 +68,16 @@ namespace Biosero.Scripting
             string FirstReplicateSibling = "";
             string FirstReplicationInstructions = "";
 
+            string RepOnePlaceholderBarcodes = "";
+            string RepTwoPlaceholderBarcodes = "";
 
-            String SecondReplicateDestName = "";
-            String SecondReplicateDestIdentifier = "";
-            String SecondReplicateOperationType = "";
-            String SecondReplicateSampleTransfers = "";
-            String SecondReplicateID = "";
-            String SecondReplicateLabware = "";
+
+            string SecondReplicateDestName = "";
+            string SecondReplicateDestIdentifier = "";
+            string SecondReplicateOperationType = "";
+            string SecondReplicateSampleTransfers = "";
+            string SecondReplicateID = "";
+            string SecondReplicateLabware = "";
             string SecondReplicationInstructions = "";
 
 
@@ -102,7 +105,7 @@ namespace Biosero.Scripting
             List<string> AllCPSourcesIdentifiersForEB = new List<string>();
             List<string> AllSerializePlates = new List<string>();
             List<string> FirstReplicatePlates = new List<string>();
-            List<string> AllSecondReplicatePlates = new List<string>();
+            List<string> SecondReplicatePlates = new List<string>();
             List<string> FirstReplicaitonPairList = new List<string>();
             List<string> SecondReplicaitonPairList = new List<string>();
             List<string> ReplicateOneList = new List<string>();
@@ -112,11 +115,8 @@ namespace Biosero.Scripting
             List<string> lowPriorityJobs = new List<string>();
             List<string> sortedJobs = new List<string>();
 
-            /*
-            List<string> AllCrashPlatesForEB = new List<string>();
-            List<string> AllCrashPlateIdentierssForEB = new List<string>();
-            List<string> AllCrashDestinationsEB = new List<string>();
-            */
+            List<string> RepOneBarcodes = new List<string>();
+            List<string> RepTwoBarcodes = new List<string>();
 
 
             IdentityHelper _identityHelper;
@@ -166,10 +166,11 @@ namespace Biosero.Scripting
                                         .Where(x => x.Name == DestinationName)
                                         .FirstOrDefault();
 
-
+                    string RepParentPlateSourceName = RepParentPlate.Name;
+                    string RepParentPlateSourceId = RepParentPlate?.Identifier;
 
                     // if not member already - add to a list of all EB CP sources for the order (for both name and identifier)
-                    if ((!AllCPSourcesForEB.Contains(DestinationName)) && (RepParentPlate != null))
+                    if ((!AllCPSourcesForEB.Contains(DestinationName)) && (DestinationParent == null))
                     {
                         Serilog.Log.Information("Plate {DestinationName}, ID {DestinationId} was added to the list of CP source plates for order", DestinationName.ToString(), DestinationId.ToString());
 
@@ -193,7 +194,7 @@ namespace Biosero.Scripting
 
                         Serilog.Log.Information("The first operation type for the order is  {FirstOperationType}", FirstOperationType.ToString());
                         string NextId = Plate.Identifier;
-                        // Serilog.Log.Information("Plate {FirstDestName} with ID (FirstDestIdentifier) is a first destination plate for the order with operation type {FirstOperationType}", FirstDestName.ToString(), FirstOperationType.ToString(), FirstDestIdentifier.ToString());
+
 
                         // If operation type = Serialise
                         if (FirstOperationType == "Serialise")
@@ -264,17 +265,17 @@ namespace Biosero.Scripting
 
 
                                 // Find a list of all next replicaiton plates for each  serialsed plate (if exists)
-                                var SecondReplicatePlates = destinations
+                                var SecondRepPlates = destinations
                                 .Where(x => x.ParentIdentifier != null &&
                                     x.ParentIdentifier == FirstReplicateID)
                                 .ToList();
 
-                                int CheckSecondReplicateExists = SecondReplicatePlates.Count();
+                                int CheckSecondReplicateExists = SecondRepPlates.Count();
 
                                 // Are there Second replicasitons needed? only proceed if required
                                 if (CheckSecondReplicateExists > 0)
                                 {
-                                    foreach (var SecondPlateRep in SecondReplicatePlates)
+                                    foreach (var SecondPlateRep in SecondRepPlates)
                                     {
                                         SecondReplicateDestName = SecondPlateRep.Name;
                                         SecondReplicateDestIdentifier = SecondPlateRep.Identifier;
@@ -293,10 +294,10 @@ namespace Biosero.Scripting
                                         }
 
                                         // if not member already - add to a list of all Echo plates needed for the order
-                                        if (!AllSecondReplicatePlates.Contains(SecondReplicateDestName))
+                                        if (!SecondReplicatePlates.Contains(SecondReplicateDestName))
                                         {
                                             Serilog.Log.Information("Plate {SecondReplicateDestName} was added to the list of second replicate destination plates for order", SecondReplicateDestName.ToString());
-                                            AllSecondReplicatePlates.Add(SecondReplicateDestName);
+                                            SecondReplicatePlates.Add(SecondReplicateDestName);
                                         }
 
                                         //Find the source for the replication destination
@@ -317,14 +318,72 @@ namespace Biosero.Scripting
                                     }
                                 }
                             }
+                            RepOneCount = FirstReplicatePlates.Count();
+                            RepTwoCount = SecondReplicatePlates.Count();
+
+
+
+                            if (RepOneCount > 0)
+                            {
+
+
+                                string REPOneInstrument = "";
+                                double REPOneVolume = Double.Parse(ExtractedReplicationVolume);
+
+                                if (REPOneVolume < 0.5)
+                                {
+                                    REPOneInstrument = "Echo";
+                                }
+                                else
+                                {
+                                    REPOneInstrument = "Bravo";
+                                }
+                            }
+
+
+
+                            if (RepTwoCount > 0)
+                            {
+
+                                string REPTwoInstrument = "";
+                                double REPTwoVolume = 0;
+
+                                if (ExtractedNextReplicationVolume != "")
+                                {
+                                    REPTwoVolume = Double.Parse(ExtractedNextReplicationVolume);
+
+                                    if (REPTwoVolume < 0.5)
+                                    {
+                                        REPTwoInstrument = "Echo";
+                                    }
+                                    else
+                                    {
+                                        REPTwoInstrument = "Bravo";
+                                    }
+                                }
+
+                            }
+
+
+                            string ReplicatePlates = string.Join(",", FirstReplicatePlates);
+                            string ReplicateTwoPlates = string.Join(",", SecondReplicatePlates);
+                            await context.AddOrUpdateGlobalVariableAsync("RepOnePlaceholderBarcodes", ReplicatePlates);
+                            await context.AddOrUpdateGlobalVariableAsync("RepTwoPlaceholderBarcodes", ReplicateTwoPlates);
+
+
+                            await context.AddOrUpdateGlobalVariableAsync("REPOneLabwareType", FirstReplicateLabware);
+                            await context.AddOrUpdateGlobalVariableAsync("REPTwoLabwareType", SecondReplicateLabware);
+
+
                         }
                         //if the first operation on EB is replicate operation
                         else if (FirstOperationType == "Replicate")
                         {
                             // Find a list of all first replicates 
                             var FirstRepPlates = destinations
-                            .Where(x => x.ParentIdentifier == null)
+                            .Where(x => x.ParentIdentifier != null)
                             .ToList();
+
 
                             //Loop through all first replicaiton plates
                             foreach (var PlateReplicateOne in FirstRepPlates)
@@ -337,21 +396,16 @@ namespace Biosero.Scripting
                                 FirstReplicateLabware = PlateReplicateOne.CommonName;
                                 FirstReplicateSibling = PlateReplicateOne.SiblingIdentifier;
 
-                                //Extract the sampletransfer for the replicaiton
-                                var ExtractNum = destinations
-                                .Where(x => x.ParentIdentifier != null && x.Identifier == FirstReplicateID)
-                                .FirstOrDefault();
 
                                 if (ExtractedReplicationVolume == "")
                                 {
-                                    ExtractedReplicationVolume = ExtractNumber(ExtractNum.SampleTransfers);
+                                    ExtractedReplicationVolume = ExtractNumber(FirstReplicateSampleTransfers);
                                 }
-
-
 
                                 // if not member already - add to a list of all First replication plates needed for the order
                                 if (!FirstReplicatePlates.Contains(FirstReplicateDestName))
                                 {
+
                                     Serilog.Log.Information("Plate {FirstReplicateDestName} was added to the list of first replicate destination plates for order", FirstReplicateDestName.ToString());
                                     FirstReplicatePlates.Add(FirstReplicateDestName);
                                 }
@@ -382,17 +436,17 @@ namespace Biosero.Scripting
 
 
                                 // Find a list of all next replications for each plate (if exists)
-                                var SecondReplicatePlates = destinations
+                                var SecondReplPlates = destinations
                                 .Where(x => x.ParentIdentifier != null &&
                                     x.ParentIdentifier == FirstReplicateID)
                                 .ToList();
 
-                                int CheckFurtherReplicateExists = SecondReplicatePlates.Count();
+                                int CheckFurtherReplicateExists = SecondReplPlates.Count();
 
                                 //only continue if further replicaitons are required
                                 if (CheckFurtherReplicateExists > 0)
                                 {
-                                    foreach (var SecondPlateRep in SecondReplicatePlates)
+                                    foreach (var SecondPlateRep in SecondReplPlates)
                                     {
                                         SecondReplicateDestName = SecondPlateRep.Name;
                                         SecondReplicateDestIdentifier = SecondPlateRep.Identifier;
@@ -413,10 +467,10 @@ namespace Biosero.Scripting
                                         }
 
                                         // if not member already - add to a list of all next replicate plates needed for the order
-                                        if (!AllSecondReplicatePlates.Contains(SecondReplicateDestName))
+                                        if (!SecondReplicatePlates.Contains(SecondReplicateDestName))
                                         {
                                             Serilog.Log.Information("Plate {SecondReplicateDestName} was added to the list of second replicates for order", SecondReplicateDestName.ToString());
-                                            AllSecondReplicatePlates.Add(SecondReplicateDestName);
+                                            SecondReplicatePlates.Add(SecondReplicateDestName);
                                         }
 
                                         //Find the source for the replication destination
@@ -438,13 +492,86 @@ namespace Biosero.Scripting
                                 }
 
                             }
+                            RepOneCount = FirstReplicatePlates.Count();
+                            RepTwoCount = SecondReplicatePlates.Count();
 
+
+
+                            if (RepOneCount > 0)
+                            {
+                                //   for (int i = 1; i <= RepOneCount; i++)
+                                //   {
+                                //       RepOneBarcodes.Add("REPOne " + i);
+                                //   }
+
+                                //    RepOnePlaceholderBarcodes = String.Join(", ", RepOneBarcodes);
+
+                                string REPOneInstrument = "";
+                                double REPOneVolume = Double.Parse(ExtractedReplicationVolume);
+
+                                if (REPOneVolume < 0.5)
+                                {
+                                    REPOneInstrument = "Echo";
+                                }
+                                else
+                                {
+                                    REPOneInstrument = "Bravo";
+                                }
+                            }
+
+
+
+                            if (RepTwoCount > 0)
+                            {
+
+                                //    for (int i = 1; i <= 10; i++)
+                                //    {
+                                //        RepTwoBarcodes.Add("REPTwo " + i);
+                                //    }
+
+                                //    RepTwoPlaceholderBarcodes = String.Join(", ", RepTwoBarcodes);
+                                string REPTwoInstrument = "";
+                                double REPTwoVolume = 0;
+
+                                if (ExtractedNextReplicationVolume != "")
+                                {
+                                    REPTwoVolume = Double.Parse(ExtractedNextReplicationVolume);
+
+                                    if (REPTwoVolume < 0.5)
+                                    {
+                                        REPTwoInstrument = "Echo";
+                                    }
+                                    else
+                                    {
+                                        REPTwoInstrument = "Bravo";
+                                    }
+                                }
+
+                            }
+
+                            string ReplicatePlates = string.Join(",", FirstReplicatePlates);
+                            string ReplicateTwoPlates = string.Join(",", SecondReplicatePlates);
+                            await context.AddOrUpdateGlobalVariableAsync("RepOnePlaceholderBarcodes", ReplicatePlates);
+                            await context.AddOrUpdateGlobalVariableAsync("RepTwoPlaceholderBarcodes", ReplicateTwoPlates);
+
+
+                            await context.AddOrUpdateGlobalVariableAsync("REPOneLabwareType", FirstReplicateLabware);
+                            await context.AddOrUpdateGlobalVariableAsync("REPTwoLabwareType", SecondReplicateLabware);
                         }
                     }
 
                 }
 
             }
+
+
+
+            EBSourcesCount = AllCPSourcesForEB.Count();
+
+            string EBSources = string.Join(",", AllCPSourcesForEB);
+
+
+            await context.AddOrUpdateGlobalVariableAsync("CPSourcesForEB", EBSources);
 
 
             // Format the array of first replicate instructions to a string
@@ -496,7 +623,7 @@ namespace Biosero.Scripting
 
 
             //////////////////////////////
-            /// This may be related to crash only (nd handled elsewhere...). Commenting out for the time being
+            /// This may be related to crash only (and handled elsewhere...). Commenting out for the time being
             /// //////////////////////////////
             /*
             if (JobWorkflowFragment == "Replicate")
@@ -565,7 +692,6 @@ namespace Biosero.Scripting
                 string RepOnePlaceholderBarcodes = "";
                 string RepTwoPlaceholderBarcodes = "";
 
-                EBSourcesCount = AllCPSourcesForEB.Count();
                 RepOneCount = FirstReplicatePlates.Count();
                 RepTwoCount = AllNextReplicatePlates.Count();
 
@@ -629,29 +755,22 @@ namespace Biosero.Scripting
 
 
 
-                string EBSources = string.Join(",", AllCPSourcesForEB);
-                string AllEBSources = string.Join(",", AllCPSourcesForEB);
+
                 string EBSourcesIdentifiers = string.Join(",", AllCPSourcesIdentifiersForEB);
                 string SerializePlates = string.Join(",", AllSerializePlates);
                 string ReplicatePlates = string.Join(",", FirstReplicatePlates);
                 string ReplicateTwoReplicatePlates = string.Join(",", AllNextReplicatePlates);
+                await context.AddOrUpdateGlobalVariableAsync("RepOnePlaceholderBarcodes", ReplicateOneListString);
+
+                await context.AddOrUpdateGlobalVariableAsync("RepTwoPlaceholderBarcodes", RepTwoPlaceholderBarcodes);
 
 
                 Serilog.Log.Information("The sources required for the run from CP to EB = {EBSources}", EBSources.ToString());
 
                 Serilog.Log.Information("Total sources required for the run from CP to EB = {EBSourcesCount}", EBSourcesCount.ToString());
 
-                await context.AddOrUpdateGlobalVariableAsync("REPOneLabwareType", NextReplicateLabware);
 
-                await context.AddOrUpdateGlobalVariableAsync("REPTwoLabwareType", FurtherReplicateLabware);
-
-                await context.AddOrUpdateGlobalVariableAsync("RepOnePlaceholderBarcodes", ReplicateOneListString);
-
-                await context.AddOrUpdateGlobalVariableAsync("RepTwoPlaceholderBarcodes", RepTwoPlaceholderBarcodes);
-
-                await context.AddOrUpdateGlobalVariableAsync("CPSourcesForEB", EBSources);
-
-                await context.AddOrUpdateGlobalVariableAsync("AllEBSources", AllEBSources);
+ 
 
 
 
