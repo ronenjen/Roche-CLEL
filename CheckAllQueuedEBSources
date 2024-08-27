@@ -22,7 +22,7 @@ using Roche.LAMA1;
 using Roche.LAMA1.Models;
 using Roche.LAMA1.MosaicTypes;
 using Biosero.DataServices.RestClient;
-using Biosero.DataModels.Events;
+using Biosero.DataModels.Events;A
 using Biosero.DataModels.Ordering;
 using Biosero.DataModels.Clients;
 using Biosero.DataModels.Resources;
@@ -239,206 +239,153 @@ namespace Biosero.Scripting
 
                 }
 
+                var SourceForDestination = sources
+                .Where(x => x.ParentIdentifier == DestID)
+                .FirstOrDefault();
 
-                //Retrieve the transfer volume if replicate type
-                if (DestOperationType == "Replicate")
+                if (SourceForDestination != null)
                 {
-                    string cleanedInput = DestSampleTransfers.Trim();
-                    // Convert the cleaned string to a double
-                    double RepTransferVolume = double.Parse(cleanedInput);
-                }
+                    string SourceOperation = SourceForDestination.OperationType.ToString();
+                    string SameSourceName = SourceForDestination.Name;
+                    string SameSourceStatus = SourceForDestination.Status.ToString();
+                    string SameSourceIdentifier = SourceForDestination.Identifier;
+                    int SourceJobID = SourceForDestination.JobId;
 
-                //check if current plate is on EB
-                bool isInList = CPToEBBarcodes.Contains(DestName);
 
-                if (isInList)
-                {
-                    //Add plate to dedicated arrays if found
-                    if (!AllDestinationsForOrder.Contains(DestName))
+                    bool isFirstSource = string.IsNullOrWhiteSpace(SourceForDestination.ParentIdentifier);
+
+                    //Add plate to list of plates only if of CherryPick opertion type and child source id either serialise or replicate
+
+                    if ((!AllDestinationsForOrder.Contains(DestName)) && (DestOperationType == "CherryPick") && (SourceOperation == "Serialise" || SourceOperation == "Replicate") && (isFirstSource))
                     {
                         AllDestinationsForOrder.Add(DestName);
                         QueuedDestinationsForOrder.Add(DestName);
                         Serilog.Log.Information("### Adding {DestName} to QueuedDestinationsForOrder and AllDestinationsForOrder", DestName.ToString());
                     }
 
-                    Serilog.Log.Information("Looking for any Finished plates for Order {RequestedOrder}", RequestedOrder.ToString());
-                    Serilog.Log.Information("Current Plate Name  {DestName}", DestName.ToString());
 
-
-                    //Get the source plate for the current destination plate name
-                    var cc = sources
-                    .Where(x => x.ParentIdentifier == DestID)
-                    .FirstOrDefault();
-
-                    string SameSourceName = cc.Name;
-                    string SameSourceStatus = cc.Status.ToString();
-                    string SameSourceIdentifier = cc.Identifier;
-                    int SourceJobID = cc.JobId;
-                    string SameSourceOperationType = cc.OperationType.ToString();
-
-
-                    //Get the source plate for the current destination plate name
-                    var dd = destinations
+                    //Get the destination for the next child source
+                    var ChildSourceDestination = destinations
                     .Where(x => x.SiblingIdentifier == SameSourceIdentifier)
                     .FirstOrDefault();
 
-                    string DestinationName = dd.Name;
-                    string DestinationStatus = dd.Status.ToString();
-                    string DestinationIdentifier = dd.Identifier;
-                    int DestinationJobID = dd.JobId;
-                    string DestinationOperationType = dd.OperationType.ToString();
-
-                    //Setting status to QUEUED
-
-                    Console.WriteLine($"***********  8888  {DestinationName} 8888 {DestinationStatus} 8888 {DestOperationType} " + Environment.NewLine);
-
-                    
-                    Console.WriteLine($"***bbbb********  Current state for CP {DestName} is  plate {DestState}  " + Environment.NewLine);
-
-
-                    if ((DestState == "Pending") && (DestOperationType == "CherryPick"))
+                    if (ChildSourceDestination != null)
                     {
-                        cc.Properties.SetValue("Status", "Queued");
-                        _identityHelper.Register(cc, SourceJobID, RequestedOrder);
+                        string DestinationName = ChildSourceDestination.Name;
+                        string DestinationStatus = ChildSourceDestination.Status.ToString();
+                        string DestinationIdentifier = ChildSourceDestination.Identifier;
+                        int DestinationJobID = ChildSourceDestination.JobId;
+                        string DestinationOperationType = ChildSourceDestination.OperationType.ToString();
 
-                        Console.WriteLine($"***********  source plate  {SameSourceName} with id {SameSourceIdentifier} and operation {SameSourceOperationType} was set to Queued" + Environment.NewLine);
-
-                        dd.Properties.SetValue("Status", "Queued");
-                        _identityHelper.Register(dd, DestinationJobID, RequestedOrder);
-
-                        Console.WriteLine($"***********  destination plate  {DestinationName} with id {DestinationIdentifier} and operation {DestinationOperationType} was set to Queued" + Environment.NewLine);
+                        //Setting status to QUEUED for all destinations siblings for the child source. only if both CP and next destination are pending
 
 
-                        //  string NewSourceIdentifier = dd.Identifier;
+                        if ((DestState == "Pending") && (DestOperationType == "CherryPick") )
+                        {
+                            SourceForDestination.Properties.SetValue("Status", "Queued");
+                            _identityHelper.Register(SourceForDestination, SourceJobID, RequestedOrder);
 
-                        var ee = sources
-                        .Where(x => x.ParentIdentifier == DestinationIdentifier)
-                        .FirstOrDefault();
+                            Console.WriteLine($"***********  source plate  {SameSourceName} with id {SameSourceIdentifier} and operation {SourceOperation} was set to Queued" + Environment.NewLine);
 
-                        //  ee.Properties.SetValue("Status", "Queued");
-                        // _identityHelper.Register(ee, DestinationJobID, RequestedOrder);
+                            ChildSourceDestination.Properties.SetValue("Status", "Queued");
+                            _identityHelper.Register(ChildSourceDestination, DestinationJobID, RequestedOrder);
 
-                        //  string DestinationChildSourceIdentifier = ee.Identifier;
-                        // string DestinationChildSourceOperationType = ee.OperationType.ToString();
+                            Console.WriteLine($"***********  destination plate  {DestinationName} with id {DestinationIdentifier} and operation {DestinationOperationType} was set to Queued" + Environment.NewLine);
 
-                        // Console.WriteLine($"***********  next source  plate {DestinationName} with id {DestinationChildSourceIdentifier} and operation {DestinationChildSourceOperationType} was set to Queued" + Environment.NewLine);
+
+                        }
+                        else
+                        {
+                            Console.WriteLine($"****NOTHING TO SEE HERE" + Environment.NewLine);
+
+                        }
+
+
+
+                        string NextSourceStatus = SourceForDestination.Status.ToString();
+
+
+                        if (NextSourceStatus == "Queued")
+                        {
+                            SourceForDestination.Properties.SetValue("Status", "Validating");
+                            _identityHelper.Register(SourceForDestination, SourceJobID, RequestedOrder);
+
+
+                            Console.WriteLine($"***********  source plate  {SameSourceName}  with id {SameSourceIdentifier} and operation {SourceOperation}  was set to Validating" + Environment.NewLine);
+
+
+                            ChildSourceDestination.Properties.SetValue("Status", "Validating");
+                            _identityHelper.Register(ChildSourceDestination, DestinationJobID, RequestedOrder);
+
+
+                            Console.WriteLine($"***********  destination plate  {DestinationName} with id {DestinationIdentifier} and operation {DestinationOperationType}  was set to Validating" + Environment.NewLine);
+
+                           
+                        }
+
+
+                        if ((!ReadyDestinationsForEB.Contains(DestName)) && (DestState == "Finished") )
+                        {
+                            ReadyDestinationsForEB.Add(DestName);
+                            ReadyDestinationsIDsForEB.Add(DestID);
+
+                            //    var currentStatus = SourceIndentityState;
+                            SourceForDestination.Properties.SetValue("Status", "Ready");
+                            _identityHelper.Register(SourceForDestination, SourceJobID, RequestedOrder);
+
+                            Console.WriteLine($"***********  source plate  {SameSourceName}  with id {SameSourceIdentifier} and operation {SourceOperation}  was set to Ready" + Environment.NewLine);
+
+
+                            //Add source to the list of queued sources
+                            AllQueuedSources.Add(SameSourceName);
+
+
+
+                            ChildSourceDestination.Properties.SetValue("Status", "Ready");
+                            _identityHelper.Register(ChildSourceDestination, DestinationJobID, RequestedOrder);
+
+
+                            Console.WriteLine($"***********  destination plate  {DestinationName} with id {DestinationIdentifier} and operation {DestinationOperationType}  was set to Ready" + Environment.NewLine);
+
+
+
+                            NewStatusForSource = ChildSourceDestination.Status.ToString();
+                            string CurrentDestinationName = ChildSourceDestination.Name.ToString();
+                            string CurrentDestinationIdentifier = ChildSourceDestination.Identifier;
+
+                        
+                            DestLabwareType = dest.CommonName.ToString();
+
+                        }
+
+
+                        if ((DestState == "Finished") && (DestOperationType == "CherryPick"))
+                        {
+
+
+                            var CPDestination = destinations
+                            .Where(x => x.Identifier == DestID)
+                            .FirstOrDefault();
+
+
+                            CPDestination.Properties.SetValue("Status", "Completed");
+                            _identityHelper.Register(CPDestination, SourceJobID, RequestedOrder);
+
+                            Console.WriteLine($"***********  source plate  {DestName} with id {DestinationIdentifier} and operation {DestOperationType} was set to Completed" + Environment.NewLine);
+
+                          
+
+                        }
+                        else
+                        {
+                            Console.WriteLine($"****NOTHING TO SEE HERE" + Environment.NewLine);
+
+                        }
 
 
                     }
-                    else
-                    {
-                        Console.WriteLine($"****NOTHING TO SEE HERE" + Environment.NewLine);
-
-                    }
-
-
-                    string NextSourceStatus = cc.Status.ToString();
-
-                    Console.WriteLine($"***bbbb********  Current state for CP  {DestName} is plate {DestState}  " + Environment.NewLine);
-
-                    if (NextSourceStatus == "Queued")
-                    {
-                        cc.Properties.SetValue("Status", "Validating");
-                        _identityHelper.Register(cc, SourceJobID, RequestedOrder);
-
-                        NewStatusForSource = cc.Status.ToString();
-
-                        Console.WriteLine($"***********  source plate  {SameSourceName}  with id {SameSourceIdentifier} and operation {SameSourceOperationType}  was set to Validating" + Environment.NewLine);
-
-
-                        dd.Properties.SetValue("Status", "Validating");
-                        _identityHelper.Register(dd, DestinationJobID, RequestedOrder);
-
-                        string NewSourceIdentifier = dd.Identifier;
-
-                        Console.WriteLine($"***********  destination plate  {DestinationName} with id {DestinationIdentifier} and operation {DestinationOperationType}  was set to Validating" + Environment.NewLine);
-
-
-                        var ff = sources
-                        .Where(x => x.ParentIdentifier == NewSourceIdentifier)
-                        .FirstOrDefault();
-
-                        string DestinationChildSourceIdentifier1 = ff.Identifier;
-                        string DestinationChildSourceOperationType1 = ff.OperationType.ToString();
-
-                        //  ff.Properties.SetValue("Status", "Validating");
-                        //  _identityHelper.Register(ff, DestinationJobID, RequestedOrder);
-
-                        //  string ValidatingSourceIdentifier = ff.Identifier;
-
-                        //  Console.WriteLine($"***********  next source  plate {DestinationName} with id {DestinationChildSourceIdentifier1} and operation {DestinationChildSourceOperationType1} was set to Validating" + Environment.NewLine);
-                    }
-
-                    //If plate not currently in the ReadyDestinationsForEB array and is either FINISHED or PENDING - 
-
-                    Console.WriteLine($"***bbbb********  Current state for CP plate {DestName} is {DestState}  " + Environment.NewLine);
-
-
-
-                    if ((!ReadyDestinationsForEB.Contains(DestName)) && (DestState == "Finished") && (NewStatusForSource == "Finished"))
-                    {
-                        int SameSourceJobID = cc.JobId;
-                        Console.WriteLine($"***********  CP destination plate {DestName} has finished - setting the child plate (source) to status of QUEUED " + Environment.NewLine);
-                        // Serilog.Log.Information("Got One plate!= {DestName}", DestName.ToString())7;
-
-                        ReadyDestinationsForEB.Add(DestName);
-                        ReadyDestinationsIDsForEB.Add(DestID);
-
-                        //    var currentStatus = SourceIndentityState;
-                        cc.Properties.SetValue("Status", "Ready");
-                        _identityHelper.Register(cc, SameSourceJobID, RequestedOrder);
-
-                        string FirstIdentifier = cc.Identifier;
-
-                        //Add source to the list of queued sources
-                        AllQueuedSources.Add(SameSourceName);
-
-
-                        Console.WriteLine($"XXX***********  source plate  {SameSourceName} with identifier {FirstIdentifier} was set to Ready" + Environment.NewLine);
-
-
-
-
-                        dd.Properties.SetValue("Status", "Ready");
-                        _identityHelper.Register(dd, DestinationJobID, RequestedOrder);
-
-                        NewStatusForSource = dd.Status.ToString();
-                        string CurrentDestinationName = dd.Name.ToString();
-                        string CurrentDestinationIdentifier = dd.Identifier;
-
-                        Console.WriteLine($"XXXX***********  destination plate  {CurrentDestinationName} with ID {CurrentDestinationIdentifier} was set to Ready" + Environment.NewLine);
-
-
-                        var ll = sources
-                        .Where(x => x.ParentIdentifier == CurrentDestinationIdentifier)
-                        .FirstOrDefault();
-
-
-                        string CurrentIdentifier = ll.Identifier;
-                        string CurrentName = ll.Name;
-                        int CurrentJobId = dd.JobId;
-                        string CurrentOperationType = ll.OperationType.ToString();
-
-                        //    ll.Properties.SetValue("Status", "Ready");
-                        //    _identityHelper.Register(ll, CurrentJobId, RequestedOrder);
-
-
-
-                        //    Console.WriteLine($"XXXX***********  source  plate  {CurrentName} with ID {CurrentIdentifier} and operation {CurrentOperationType} was set to Ready " + Environment.NewLine);
-
-
-
-
-                        DestLabwareType = dest.CommonName.ToString();
-
-                        Console.WriteLine($"***********       CheckAllQueuedEBSources: Adding Plate to ReadyDestinatonForEB array, total finished CP plates: {ReadyDestinationsForEB.Count} " + Environment.NewLine);
-                    }
-
-
-
-
-
                 }
+
             }
 
             //format EB operations list to a comma separated list
@@ -536,6 +483,9 @@ namespace Biosero.Scripting
             Console.WriteLine($"******EBSourcesToBeTransferred is here: {AllEBReadySources} " + Environment.NewLine);
             Console.WriteLine($"******TotalEBReadySources is here: {TotalEBReadySources} " + Environment.NewLine);
             Console.WriteLine($"******EBRempSourceLabwareType is here: {DestLabwareType} " + Environment.NewLine);
+
+            //end of for destination loop 
+
 
         }
 
