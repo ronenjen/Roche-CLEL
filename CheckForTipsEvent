@@ -10,6 +10,7 @@ Script written by Ronen Peleg (ronenpeleg@biosero.com)
 
 Description:
 Look for any inventory or Tips events for the current day. Add TRUE or FALSE accordingly
+Text
 */
 
 namespace Biosero.Scripting
