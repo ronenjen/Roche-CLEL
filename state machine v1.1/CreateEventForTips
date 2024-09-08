@@ -9,28 +9,27 @@ using System.Threading.Tasks;
 Script written by Ronen Peleg (ronenpeleg@biosero.com)
 
 Description:
-Registers a new InventorySentEvent
+Registers a new TipsSentEvent
 */
-
-
 namespace Biosero.Scripting
 {
-    public class CreateInventoryEvent
+    public class CreateEventForTips
     {
         public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
         {
-            //New InventorySentEvent called Transfer with current timestamp and "Roche-Orchestrator" set as actor
-            InventorySentEvent transfer = new InventorySentEvent()
+            //New TipsSentEvent called Transfer with current timestamp and "Roche-Orchestrator" set as actor
+            TipsSentEvent transfer = new TipsSentEvent()
             {
                 TimeStamp = DateTime.Now,
                 OperatorIdentifier = "Roche-Orchestrator",
             };
 
             var now = DateTimeOffset.Now;
-            //Add the new inventory event using the TRANSFER data defined above
+
+            //Add the new tips event using the TRANSFER data defined above
             await client.AddEventAsync(new AddEventCommand
             {
-                Topic = "Biosero.Scripting.InventorySentEvent",
+                Topic = "Biosero.Scripting.TipsSentEvent",
                 Data = JsonConvert.SerializeObject(transfer),
                 Start = now,
                 End = now,
@@ -39,13 +38,12 @@ namespace Biosero.Scripting
                 Subjects = new string[] { "" }
             });
 
-            Serilog.Log.Information("Inventory Operation Required= Yes");
+            Serilog.Log.Information("TecanTipRacksSent= Yes ");
         }
     }
 
-
-    // Class defining the structure of the InventorySentEvent
-    public class InventorySentEvent
+    // Class defining the structure of the TipsSentEvent
+    public class TipsSentEvent
     {
         public DateTimeOffset TimeStamp { get; set; }
 

@@ -1,0 +1,66 @@
+using Biosero.DataModels.Ordering;
+using Biosero.DataServices.Client;
+using Biosero.Orchestrator.WorkflowService;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using System;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+/*
+Script written by Ronen Peleg (ronenpeleg@biosero.com)
+
+Description:
+Registers a new CreateREMPONEvent
+*/
+
+namespace Biosero.Scripting
+{
+    public class SetREMPONDescisionForOrder
+    {
+        public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
+        {
+            string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
+
+
+            var events = await client.GetEventsAsync(topic: "Biosero.Scripting.REMPOnEvent");
+
+
+
+
+
+            foreach (var REMPOnEvent in events)
+            {
+
+
+                    string jsonString = REMPOnEvent.Data.ToString();
+
+                    // Parse the JSON string
+                    JObject json = JObject.Parse(jsonString);
+
+                    // Extract the value of orderID
+                    string orderId = json["orderID"].ToString();
+                    string REMPStatus = json["rempon"].ToString();
+
+                    bool REMPDecision = bool.Parse(REMPStatus);
+
+
+                    Console.WriteLine($"  the order id is  {orderId}  and status is {REMPStatus}  " + Environment.NewLine);
+
+                if (orderId==RequestedOrder)
+                {
+
+                    await context.AddOrUpdateGlobalVariableAsync("REMPOnToBeDone", REMPDecision);
+                    Console.WriteLine($" Doing REMP for order {RequestedOrder} REMPOnToBeDone is {REMPDecision}" + Environment.NewLine);
+                }
+
+
+            }
+
+
+
+        }
+
+    }
+}

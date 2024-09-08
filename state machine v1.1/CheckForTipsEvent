@@ -10,7 +10,6 @@ Script written by Ronen Peleg (ronenpeleg@biosero.com)
 
 Description:
 Look for any inventory or Tips events for the current day. Add TRUE or FALSE accordingly
-Text
 */
 
 namespace Biosero.Scripting
@@ -45,7 +44,6 @@ namespace Biosero.Scripting
 
             //If any found, add as TRUE to DS variable "InventoryEventsFound" FALSE otherwise
             await context.AddOrUpdateGlobalVariableAsync("InventoryEventsFound", events.Any());
-
 
             Serilog.Log.Information("Inventory Events Found= {InventoryEventsFound}", events.Any());
         }

@@ -1,0 +1,272 @@
+#r Roche.LAMA1.dll
+
+
+/*
+Script written by Ronen Peleg (ronenpeleg@biosero.com)
+
+Description:
+Initial script to determine the type of order jobs required to be processed and their contents.
+The script also populates various required variables in dataservices in down the line processes
+*/
+
+
+
+
+using Biosero.DataServices.Client;
+using Biosero.Orchestrator.WorkflowService;
+using Newtonsoft.Json;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Text;
+using System.Linq;
+using Roche.LAMA1;
+using Roche.LAMA1.Models;
+using Roche.LAMA1.MosaicTypes;
+using Biosero.DataServices.RestClient;
+using Biosero.DataModels.Events;
+using Biosero.DataModels.Ordering;
+using Biosero.DataModels.Clients;
+using Biosero.DataModels.Resources;
+using System.Security.Cryptography;
+using System.Collections;
+using System.Numerics;
+
+
+namespace Biosero.Scripting
+{
+    public class SetREMPRacksToProcessing
+    {
+        public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
+        {
+            string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
+            string QueuedSources = context.GetGlobalVariableValue<string>("Queued Sources");
+
+
+            Console.WriteLine($" &&&&&&&&&&&&&&&&&&&&&&&&  " + Environment.NewLine);
+            Console.WriteLine($"  QueuedSources here {QueuedSources}   " + Environment.NewLine);
+
+            await context.AddOrUpdateGlobalVariableAsync("REMPOnToBeDone", true);
+
+            int TotalTransportingSource = 0;
+            bool REMPToBeDone = true;
+            string firstorderId = RequestedOrder;
+
+            var orders = await client.GetOrdersAsync();
+
+            orders = orders
+                .Where(x => x.StatusDetails == "Running..." && x.TemplateName == "State Machine V1.1")
+                .OrderBy(x => x.CreationTime)  // Replace OrderNumber with the actual numeric property
+                .ToArray();
+
+            var firstOrder = orders.FirstOrDefault();
+
+            if (firstOrder != null)
+            {
+
+                var firstorderIdentifier = firstOrder.InputParameters;
+
+
+                var d = firstorderIdentifier
+                .Where(x => x.Name == "OrderId")
+                .FirstOrDefault();
+
+
+                if (d != null)
+                {
+                    firstorderId = d.Value.ToString();
+                }
+            }
+            else
+            {
+                firstorderId = RequestedOrder;
+
+            }
+
+            Console.WriteLine($"  first order done is {firstorderId}  " + Environment.NewLine);
+
+            // connnect to the DS server, declare query, assecssioning and event clients for the URL
+           // string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+            string API_BASE_URL =  context.GetGlobalVariableValue<string>("_url"); // "http://1 92.168.14.10:8105/api/v2.0/";
+            
+            IQueryClient _queryClient = new QueryClient(API_BASE_URL);
+            IAccessioningClient _accessioningClient = new AccessioningClient(API_BASE_URL);
+            IEventClient _eventClient = new EventClient(API_BASE_URL);
+
+            IdentityHelper _identityHelper;
+
+            //Build out and register the root identities (i.e Mosaic Job) if they do not exist
+            _identityHelper = new IdentityHelper(_queryClient, _accessioningClient, _eventClient);
+            _identityHelper.BuildBaseIdentities();
+
+            //Get all the sources associated with this order
+            var sources = _identityHelper.GetSources(RequestedOrder).ToList();
+            //Get all the Sources associated with this order
+            var destinations = _identityHelper.GetDestinations(RequestedOrder).ToList();
+            //Get all the jobs
+            var jobs = _identityHelper.GetJobs(RequestedOrder).ToList();
+
+            foreach (var transportorder in orders)
+            {
+
+                string TransportOrderId = transportorder.Identifier;
+
+                foreach (var param1 in transportorder.InputParameters)
+                {
+                    if (param1.Name == "OrderId")
+                    {
+                        string orderIdValue = param1.Value.ToString();
+                        var innersources = _identityHelper.GetSources(orderIdValue).ToList();
+
+                        var d = innersources
+                        .Where(x => x.Name == QueuedSources)
+                        .FirstOrDefault();
+
+                        if (d != null)
+                        {
+
+                            string TransportinnersourcesStatus = d.Status.ToString();
+                            string TransportinnersourcesName = d.Name;
+
+                            if (TransportinnersourcesStatus == "Transporting")
+                            {
+                                TotalTransportingSource++;
+                                Console.WriteLine($"  added {TransportinnersourcesName} and 1 count to TotalTransportingSource   " + Environment.NewLine);
+
+                            }
+                        }
+                    }
+                }
+            }
+
+            var TransportingSources = sources
+            .Where(x => x.Status.ToString() == "Transporting")
+            .ToList();
+
+
+            // Loop through each item in TransportingSources
+            foreach (var source in TransportingSources)
+            {
+                string transportingSourceName = source.Name;
+                string transportingSourceId = source.Identifier;
+                string transportingSourceOperation = source.OperationType.ToString();
+                string transportStaus = source.Status.ToString();
+                int transportingSourceJob = source.JobId;
+
+
+                Console.WriteLine($"  source  plate  {transportingSourceName}  " + Environment.NewLine);
+
+                if (QueuedSources.Contains(transportingSourceName))
+                {
+                    source.Properties.SetValue("Status", "Processing");
+                    _identityHelper.Register(source, transportingSourceJob, RequestedOrder);
+
+                    Console.WriteLine($"  source  plate  {transportingSourceName} with ID {transportingSourceId} and operation {transportingSourceOperation} was set to PROCESSING " + Environment.NewLine);
+
+                }
+            }
+
+
+            Console.WriteLine($"  Total TotalTransportingSource is {TotalTransportingSource} " + Environment.NewLine);
+
+
+            var c = sources
+            .Where(x => x.Name == QueuedSources)
+            .FirstOrDefault();
+
+            if (c != null)
+            {
+
+                string CurrentSourceName = c.Name;
+                string CurrentSourceStatus = c.Status.ToString();
+                int CurrentJobID = c.JobId; // Identity Job as string
+
+
+                // If there ar emore than 1 running orders
+
+                if (TotalTransportingSource > 0)
+                {
+                    Console.WriteLine($"  More than one transport order for order {RequestedOrder} " + Environment.NewLine);
+                    foreach (var order in orders)
+                    {
+                        Console.WriteLine($" in first for -  for order {RequestedOrder} " + Environment.NewLine);
+                        //find the order Id
+                        string OrderId = order.Identifier;
+
+                        foreach (var param in order.InputParameters)
+                        {
+                            Console.WriteLine($" in second  for -  for order {RequestedOrder} " + Environment.NewLine);
+                            if (param.Name == "OrderId")
+                            {
+                                string orderIdValue = param.Value.ToString();
+
+
+                                Console.WriteLine($" order id value is {orderIdValue} -  for order {RequestedOrder} " + Environment.NewLine);
+
+
+                                var innersources = _identityHelper.GetSources(orderIdValue).ToList();
+
+                                //if running order not equal to the current order
+                                if ((orderIdValue != RequestedOrder) && (RequestedOrder != firstorderId))
+                                {
+                                    Console.WriteLine($"  Update done for order {RequestedOrder} - orderid value = {orderIdValue}, first order id = {firstorderId}" + Environment.NewLine);
+                                    // Find all sources for order Id
+                                    foreach (var innersource in innersources)
+                                    {
+                                        int identityJobID = innersource.JobId;
+                                        string SourceIdentityID = innersource.Identifier;
+                                        string SourceIdentityName = innersource.Name;
+                                        string SourceIdentityType = innersource.TypeIdentifier;
+                                        string SourceIndentityState = innersource.Status.ToString();
+
+                                        //if it is the same source
+                                        if (SourceIdentityName == CurrentSourceName)
+                                        {
+                                            Console.WriteLine($" Main update done -  for order {RequestedOrder} " + Environment.NewLine);
+                                            c.Properties.SetValue("Status", "Processing");
+                                            _identityHelper.Register(c, CurrentJobID, RequestedOrder);
+                                            REMPToBeDone = false;
+
+                                            Console.WriteLine($" Status for rack  {CurrentSourceName}  is set to {SourceIndentityState} for Order {RequestedOrder} REMPOnToBeDone set to false" + Environment.NewLine);
+
+                                        }
+
+                                    }
+                                }
+
+                            }
+                        }
+                    }
+                }
+            }
+            /*  else
+              {
+
+                  Console.WriteLine($" less than 1 order " + Environment.NewLine);
+                  c.Properties.SetValue("Status", "Processing");
+                  _identityHelper.Register(c, CurrentJobID, RequestedOrder);
+                  await context.AddOrUpdateGlobalVariableAsync("REMPOnToBeDone", true);
+
+                  Console.WriteLine($" Status for rack  {CurrentSourceName}  is set to  Processing for Order {RequestedOrder} REMPOnToBeDone set to true" + Environment.NewLine);
+
+              }
+            */
+            if (REMPToBeDone == false)
+            {
+                Console.WriteLine($" Not Doing REMP for order {RequestedOrder}. REMPOnToBeDone is TRUE" + Environment.NewLine);
+                await context.AddOrUpdateGlobalVariableAsync("REMPOnToBeDone", false);
+            }
+            else
+            {
+                Console.WriteLine($" Doing REMP for order {RequestedOrder} REMPOnToBeDone is FALSE" + Environment.NewLine);
+                await context.AddOrUpdateGlobalVariableAsync("REMPOnToBeDone", true);
+            }
+
+            Console.WriteLine($" &&&&&&&&&&&&&&&&&&&&&&&&  " + Environment.NewLine);
+
+        }
+    }
+}
+
+

@@ -28,7 +28,6 @@ using Biosero.DataModels.Resources;
 using System.Security.Cryptography;
 using System.Collections;
 
-
 namespace Biosero.Scripting
 {
     public class CheckAllQueuedSources
@@ -37,18 +36,19 @@ namespace Biosero.Scripting
         {
             // Retrieve order ID ran
             string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
+            string RacksOnCP = context.GetGlobalVariableValue<string>("CP On Racks");
 
+            Console.WriteLine($"**VSVSVS***  These are the rack currently on CP VS {RacksOnCP}  " + Environment.NewLine);
 
             // connnect to the DS server, declare query, assecssioning and event clients for the URL
-            string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+           // string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+            string API_BASE_URL =  context.GetGlobalVariableValue<string>("_url"); // "http://1 92.168.14.10:8105/api/v2.0/";
 
             IQueryClient _queryClient = new QueryClient(API_BASE_URL);
             IAccessioningClient _accessioningClient = new AccessioningClient(API_BASE_URL);
             IEventClient _eventClient = new EventClient(API_BASE_URL);
 
-
             IdentityHelper _identityHelper;
-
 
             //Build out and register the root identities (i.e Mosaic Job) if they do not exist
             _identityHelper = new IdentityHelper(_queryClient, _accessioningClient, _eventClient);
@@ -70,6 +70,8 @@ namespace Biosero.Scripting
             List<string> ReadySourcesForOrder = new List<string>();
             List<string> CancelledSourcesForOrder = new List<string>();
             List<string> ProcessedSourcesForOrder = new List<string>();
+            List<string> DuplicateSourcesForOrder = new List<string>();
+            
 
             List<string> AllCrashPlatesForOrder = new List<string>();
             List<string> QueuedCrashPlatesForOrder = new List<string>();
@@ -107,8 +109,6 @@ namespace Biosero.Scripting
                     DestSibling = string.Empty; // or any default value you deem appropriate
                 }
 
-
-
                 if (dest.ParentIdentifier != null)
                 {
                     DestinationParent = dest.ParentIdentifier.ToString();
@@ -124,7 +124,7 @@ namespace Biosero.Scripting
 
                     //////////
                     /// use the DestinationSampleTransfers to determine all required sources for the destination. 
-                    /// Add to alist of all sources and another list of all queued sources.
+                    /// Add to a list of all sources and another list of all queued sources.
                     /// Lists will be used to compare job required vs work done....
                     /// /////////////
 
@@ -133,10 +133,68 @@ namespace Biosero.Scripting
                     foreach (var value in firstValues)
                     {
                         // If unknown source, add to total list of order CP sources and queued list of sources
+                        // don't add rack if it is found using script "Get CP REMP Sources In Virtual Storage" through variable RacksOnCP
+
+                        var b = sources
+                        .Where(a => a.Name == value)
+                        .FirstOrDefault();
+
+                        string CurrentStatus = b.Status.ToString();
+
+
+                        Console.WriteLine($"******* current state under CheckAllQueuedSources - {value}, the state is {CurrentStatus} all for order id: {RequestedOrder} " + Environment.NewLine);
+
                         if (!AllSourcesForOrder.Contains(value))
                         {
-                            AllSourcesForOrder.Add(value);
+                        AllSourcesForOrder.Add(value);
+                        }
+
+
+                        if ((!QueuedSourcesForOrder.Contains(value)) && (!RacksOnCP.Contains(value)) && (CurrentStatus=="Ready"))
+                        {
+                            Console.WriteLine($"******* {value} added to all sources and queued sources for order {RequestedOrder} " + Environment.NewLine);
+
+                            
                             QueuedSourcesForOrder.Add(value);
+                        }
+                        else if ((!DuplicateSourcesForOrder.Contains(value)) )
+                        {
+                            //get all running orders
+
+                            var orders = await client.GetOrdersAsync();
+
+                            orders = orders.Where(x => x.StatusDetails == "Running..." && x.TemplateName == "State Machine V1.1").ToArray();
+
+                            foreach (var order in orders)
+                            {
+                                string OrderId = order.Identifier;
+
+                                // Assuming order.InputParameters is already a collection of Parameters
+                                foreach (var param in order.InputParameters)
+                                {
+                                    if (param.Name == "OrderId")
+                                    {
+                                        string orderIdValue = param.Value.ToString();
+
+                                        var innersources = _identityHelper.GetSources(orderIdValue).ToList();
+                                        foreach (var innersource in innersources)
+                                        {
+                                            int DuplicateidentityJobID = innersource.JobId; // Identity Job as string
+                                            string DuplicateSourceIdentityID = innersource.Identifier;
+                                            string DuplicateSourceIdentityName = innersource.Name;
+                                            string DuplicateSourceIdentityType = innersource.TypeIdentifier;
+                                            string DuplicateSourceIndentityState = innersource.Status.ToString();
+
+                                            // If we have the same REMP rack for another running order - 
+                                            if ((value == DuplicateSourceIdentityName) && (orderIdValue != RequestedOrder))
+                                            {
+                                                Console.WriteLine($"**VSVSVS***  value added to duplicates {value}  " + Environment.NewLine);
+                                                DuplicateSourcesForOrder.Add((value));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -154,15 +212,12 @@ namespace Biosero.Scripting
                     string[] Crashlines = DestinationSampleTransfers.Split(new[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
                     var firstCrashValues = Crashlines.Select(line => line.Split(',')[0]);
 
-
-
                     //get the source name for the current destination identity
                     var a = sources
                     .Where(a => a.Identifier == DestSibling)
                     .FirstOrDefault();
 
                     string SiblingName = a.Name;
-
 
                     // get the erequired source labware type
                     string SourceLabwareType = a.CommonName.ToString();
@@ -197,14 +252,56 @@ namespace Biosero.Scripting
                 {
                     //If the source is either of state "Ready" or state "Cancelled" - add to the relevant list of sources
                     // Check for cancelled CP sources and add to the relevant lists
-                    if ((!CancelledSourcesForOrder.Contains(SourceIdentityName)) && (SourceIndentityState == "Cancelled"))
+                    // don't add rack if it is found using script "Get CP REMP Sources In Virtual Storage" through variable RacksOnCP
+                    if ((!CancelledSourcesForOrder.Contains(SourceIdentityName)) && (SourceIndentityState == "Cancelled") && (!RacksOnCP.Contains(SourceIdentityName)))
                     {
+                        Console.WriteLine($"**VSVSVS***  value added to cancelled {SourceIdentityName}  " + Environment.NewLine);
                         CancelledSourcesForOrder.Add((SourceIdentityName));
                     }
                     // Check for ready CP sources and add to the relevant lists
-                    else if ((!ReadySourcesForOrder.Contains(SourceIdentityName)) && (SourceIndentityState == "Ready"))
+                    // don't add rack if it is found using script "Get CP REMP Sources In Virtual Storage" through variable RacksOnCP
+                    else if ((!ReadySourcesForOrder.Contains(SourceIdentityName)) && (SourceIndentityState == "Ready") && (!RacksOnCP.Contains(SourceIdentityName)))
                     {
+                        Console.WriteLine($"**VSVSVS***  value added to ready {SourceIdentityName}  " + Environment.NewLine);
                         ReadySourcesForOrder.Add((SourceIdentityName));
+                    }
+                    else if ((!DuplicateSourcesForOrder.Contains(SourceIdentityName)) && (SourceIndentityState == "Validating"))
+                    {
+                        //get all running orders
+                        var orders = await client.GetOrdersAsync();
+
+                        orders = orders.Where(x => x.StatusDetails == "Running..." && x.TemplateName == "State Machine V1.1").ToArray();
+
+                        foreach (var order in orders)
+                        {
+                            string OrderId = order.Identifier;
+
+                            // Assuming order.InputParameters is already a collection of Parameters
+                            foreach (var param in order.InputParameters)
+                            {
+                                if (param.Name == "OrderId")
+                                {
+                                    string orderIdValue = param.Value.ToString();
+
+                                    var innersources = _identityHelper.GetSources(orderIdValue).ToList();
+                                    foreach (var innersource in innersources)
+                                    {
+                                        int DuplicateidentityJobID = innersource.JobId; // Identity Job as string
+                                        string DuplicateSourceIdentityID = innersource.Identifier;
+                                        string DuplicateSourceIdentityName = innersource.Name;
+                                        string DuplicateSourceIdentityType = innersource.TypeIdentifier;
+                                        string DuplicateSourceIndentityState = innersource.Status.ToString();
+
+                                        // If we have the same REMP rack for another running order - 
+                                        if ((SourceIdentityName == DuplicateSourceIdentityName) && (orderIdValue != RequestedOrder) )
+                                        {
+                                            Console.WriteLine($"**VSVSVS***  value added to duplicates {SourceIdentityName}  " + Environment.NewLine);
+                                            DuplicateSourcesForOrder.Add((SourceIdentityName));
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -226,17 +323,16 @@ namespace Biosero.Scripting
 
             }
 
-
             // Format a string version of all created lists
             string AllQueuedSources = string.Join(",", QueuedSourcesForOrder);
             string AllReadyCrashPlates = string.Join(",", ReadyCrashPlatesForOrder);
             string AllReadySources = string.Join(",", ReadySourcesForOrder);
             string AllQueuedCrashPlates = string.Join(",", QueuedCrashPlatesForOrder);
+            string AllDuplicateSources = string.Join(",", DuplicateSourcesForOrder);
             string AllCancelledSources = string.Join(",", CancelledSourcesForOrder);
             string AllCancelledCrashPlates = string.Join(",", CancelledCrashPlatesForOrder);
             string AllCrashPlates = string.Join(",", AllCrashPlatesForOrder);
             string AllSources = string.Join(",", AllSourcesForOrder);
-
 
             // Count members for each list and save to a variable
             int TotalQueuedsources = QueuedSourcesForOrder.Count;
@@ -247,7 +343,6 @@ namespace Biosero.Scripting
             int TotalCancelledCrashPlates = CancelledCrashPlatesForOrder.Count;
             int Totalsources = AllSourcesForOrder.Count;
             int TotalCrashPlates = AllCrashPlatesForOrder.Count;
-
 
             Serilog.Log.Information("Following sources are queued: {AllQueuedSources}", AllQueuedSources.ToString());
             Serilog.Log.Information("Following sources have a READY state: {AllReadySources}", AllReadySources.ToString());
@@ -261,6 +356,7 @@ namespace Biosero.Scripting
             //add two ranges to a general "processed" list
             ProcessedSourcesForOrder.AddRange(CancelledSourcesForOrder);
             ProcessedSourcesForOrder.AddRange(ReadySourcesForOrder);
+            ProcessedSourcesForOrder.AddRange(DuplicateSourcesForOrder);
 
             //add two ranges to a general crash plates "processed" list
             ProcessedCrashPlatesForOrder.AddRange(CancelledCrashPlatesForOrder);
@@ -276,17 +372,21 @@ namespace Biosero.Scripting
 
 
             // add total queued and total processed sources to the relavant DS variables
-            await context.AddOrUpdateGlobalVariableAsync("Total Sources", TotalQueuedsources);
-            await context.AddOrUpdateGlobalVariableAsync("Total Processed Sources", TotalProcessedSources);
+            await context.AddOrUpdateGlobalVariableAsync("Total Sources", Totalsources);
+            await context.AddOrUpdateGlobalVariableAsync("Total Processed Sources", TotalProcessedSources); 
+
+            Console.WriteLine($"***********  total sources for the order= {Totalsources}  " + Environment.NewLine);
+            Console.WriteLine($"***********  total processed sources for the order= {TotalProcessedSources}  " + Environment.NewLine);
+
 
             // add total queued and total processed crash plates to the relavant DS variables
             await context.AddOrUpdateGlobalVariableAsync("Total Crash Plates", TotalQueuedCrashPlates);
             await context.AddOrUpdateGlobalVariableAsync("Total Processed Crash Plates", TotalProcessedCrashPlates);
 
             // add details of all proceessed sources to the relavant DS variable
-            if (TotalReadySources > 0)
+            if (TotalProcessedSources > 0)
             {
-                await context.AddOrUpdateGlobalVariableAsync("IOC Processed Racks", AllReadySources);
+                await context.AddOrUpdateGlobalVariableAsync("IOC Processed Racks", AllProcessedSources);
             }
 
             // add details of all cancelled sources to the relavant DS variable
@@ -294,7 +394,6 @@ namespace Biosero.Scripting
             {
                 await context.AddOrUpdateGlobalVariableAsync("IOC Cancelled Racks", AllCancelledSources);
             }
-
 
             // add details of all proceessed crash plates to the relavant DS variable
             if (TotalReadyCrashPlates > 0)
@@ -308,6 +407,8 @@ namespace Biosero.Scripting
                 await context.AddOrUpdateGlobalVariableAsync("IOC Cancelled Crash Plates", AllCancelledCrashPlates);
             }
 
+            Console.WriteLine($"***********  All sources for the order= {AllSources} Total sources found for the order {Totalsources} for order Id {RequestedOrder} " + Environment.NewLine);
+            Console.WriteLine($"***********  All Processed sources for the order= {AllProcessedSources} Total processed sources for the order {TotalProcessedSources} for order Id {RequestedOrder} " + Environment.NewLine);
 
             Serilog.Log.Information("All sources for the order= {AllSources} Total sources found for the order {Totalsources}", AllSources.ToString(), Totalsources.ToString());
             Serilog.Log.Information("All queued sources for the order= {AllQueuedSources} Total Queued sources for the order {TotalQueuedsources}", AllQueuedSources.ToString(), TotalQueuedsources.ToString());
@@ -317,9 +418,7 @@ namespace Biosero.Scripting
             Serilog.Log.Information("all queued crash plates for the order= {AllQueuedCrashPlates} Total Queued crash plates for the order{TotalQueuedCrashPlates}", AllQueuedCrashPlates.ToString(), TotalQueuedCrashPlates.ToString());
             Serilog.Log.Information("All processed crash plates for the order= {AllProcessedCrashPlates} Total processed crash plates for the order {TotalProcessedCrashPlates}", AllProcessedCrashPlates.ToString(), TotalProcessedCrashPlates.ToString());
 
-
         }
-
 
     }
 }
