@@ -1,0 +1,167 @@
+#r Roche.LAMA1.dll
+
+using Biosero.DataServices.Client;
+using Biosero.Orchestrator.WorkflowService;
+using Newtonsoft.Json;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Text;
+using System.Linq;
+using Roche.LAMA1;
+using Roche.LAMA1.Models;
+using Roche.LAMA1.MosaicTypes;
+using Biosero.DataServices.RestClient;
+using Biosero.DataModels.Events;
+using Biosero.DataModels.Ordering;
+using Biosero.DataModels.Clients;
+using Biosero.DataModels.Resources;
+using System.Security.Cryptography;
+using System.Collections;
+
+
+namespace Biosero.Scripting
+{
+    public class CheckAllQueuedEBSources
+    {
+        public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
+        {
+            string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
+            string CPSourcesForEB = context.GetGlobalVariableValue<string>("CPSourcesForEB");
+
+
+            //string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+            string API_BASE_URL =  context.GetGlobalVariableValue<string>("_url"); // "http://1 92.168.14.10:8105/api/v2.0/";
+            
+            
+            IQueryClient _queryClient = new QueryClient(API_BASE_URL);
+            IAccessioningClient _accessioningClient = new AccessioningClient(API_BASE_URL);
+            IEventClient _eventClient = new EventClient(API_BASE_URL);
+
+            List<string> AllSourcesForOrder = new List<string>();
+            List<string> QueuedSourcesForOrder = new List<string>();
+            List<string> ReadySourcesForEB = new List<string>();
+            List<string> CPToEBBarcodes = CPSourcesForEB.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+
+
+
+            IdentityHelper _identityHelper;
+
+
+            //Build out and register the root identities (i.e Mosaic Job) if they do not exist
+            _identityHelper = new IdentityHelper(_queryClient, _accessioningClient, _eventClient);
+            _identityHelper.BuildBaseIdentities();
+
+
+            //Get all the sources associated with this order
+            var sources = _identityHelper.GetSources(RequestedOrder).ToList();
+
+            //Get all the Sources associated with this order
+            var Sources = _identityHelper.GetSources(RequestedOrder).ToList();
+            //Get all the jobs
+            var jobs = _identityHelper.GetJobs(RequestedOrder).ToList();
+
+
+            //  MosaicSource? Source = Sources?.FirstOrDefault(d => d.Description == "777");
+            foreach (var source in sources)
+            {
+                string SourceID = source.Identifier;
+                string SourceName = source.Name;
+                string SourceType = source.TypeIdentifier;
+                string SourceState = source.Status.ToString();
+                string SourceOperationType = source.OperationType.ToString();
+                string SourceSampleTransfers = source.SampleTransfers; 
+
+                bool isInList = CPToEBBarcodes.Contains(SourceName);
+
+                    if (isInList) 
+                    {
+
+                        if (!AllSourcesForOrder.Contains(SourceName))
+                        {
+                            AllSourcesForOrder.Add(SourceName);
+                            QueuedSourcesForOrder.Add(SourceName);
+                        }
+
+
+                        if ((!ReadySourcesForEB.Contains(SourceName)) && (SourceState == "Ready"))
+                        {
+                        ReadySourcesForEB.Add((SourceName));
+                        }
+                    }
+
+
+            }
+
+            string AllEBDestinedSources = string.Join(",", AllSourcesForOrder);
+            int TotalEBDestinedSources = AllSourcesForOrder.Count;
+            string AllQueuedEBDestinedSources = string.Join(",", QueuedSourcesForOrder);
+            int TotalEBQueuedDestinedSources = QueuedSourcesForOrder.Count;
+            string AllEBReadySources = string.Join(",", ReadySourcesForEB);
+            int TotalEBReadySources = ReadySourcesForEB.Count;
+
+
+            Serilog.Log.Information("TotalEBDestinedSources= {TotalEBDestinedSources} AllEBDestinedSources {AllEBDestinedSources}", TotalEBDestinedSources.ToString(), AllEBDestinedSources.ToString());
+            Serilog.Log.Information("TotalEBQueuedDestinedSources= {TotalEBQueuedDestinedSources} AllQueuedEBDestinedSources {AllQueuedEBDestinedSources}", TotalEBQueuedDestinedSources.ToString(), AllQueuedEBDestinedSources.ToString());
+            Serilog.Log.Information("TotalEBReadySources= {TotalEBReadySources} ReadySourcesForEB {ReadySourcesForEB}", TotalEBReadySources.ToString(), ReadySourcesForEB.ToString());
+
+
+        }
+        public List<Biosero.DataModels.Resources.Identity> GetPlatesWithNumberOfParents<T>(IdentityHelper _helper, QueryClient _queryClient, int nParents, string ownerId)
+        {
+            IEnumerable<DataModels.Resources.Identity> identities = typeof(T) switch
+            {
+                Type t when t == typeof(MosaicSource) => _helper.GetSources(ownerId).Select(od => od as Biosero.DataModels.Resources.Identity),
+                Type t when t == typeof(MosaicSource) => _helper.GetSources(ownerId).Select(od => od as Biosero.DataModels.Resources.Identity),
+                Type t when t == typeof(MosaicJob) => _helper.GetJobs(ownerId).Select(od => od as Biosero.DataModels.Resources.Identity),
+                _ => throw new Exception("Type not supported"),
+            };
+
+            //   Serilog.Log.Information($"There are {orderIdents.Count} identities associated with owner ID {ownerId}");
+            Dictionary<int, List<Biosero.DataModels.Resources.Identity>> identitiesWithNumberOfParents = new Dictionary<int, List<Biosero.DataModels.Resources.Identity>>();
+
+            int numberOfParentsCount;
+            string parent;
+            string Ident;
+
+            foreach (var identity in identities)
+            {
+                numberOfParentsCount = 0;
+                parent = identity.Properties.GetOrDefaultValue("ParentIdentifier", string.Empty);
+                Ident = identity.Identifier;
+                //	Serilog.Log.Information($"Parent ID = {parent}");
+                while (parent != string.Empty)
+                {                    //add null check here?
+                    Biosero.DataModels.Resources.Identity parentId = _queryClient.GetIdentity(parent);
+                    parent = parentId.Properties.GetOrDefaultValue("ParentIdentifier", string.Empty);
+                    //Serilog.Log.Information($"Parent ID = {parent}");
+                    numberOfParentsCount += 1;
+                }
+
+                if (identitiesWithNumberOfParents.ContainsKey(numberOfParentsCount))
+                {
+                    identitiesWithNumberOfParents[numberOfParentsCount].Add(identity);
+                }
+
+                else
+                {
+                    identitiesWithNumberOfParents.Add(numberOfParentsCount, new List<Biosero.DataModels.Resources.Identity> { identity });
+                }
+            }
+            foreach (KeyValuePair<int, List<Biosero.DataModels.Resources.Identity>> kvp in identitiesWithNumberOfParents)
+            {
+                //   Serilog.Log.Information($"There are {kvp.Value.Count} identities with  {kvp.Key} parents");
+            }
+            if (identitiesWithNumberOfParents.ContainsKey(nParents))
+            {
+                return identitiesWithNumberOfParents[nParents];
+            }
+            else
+            {
+                return new List<Biosero.DataModels.Resources.Identity>();
+            }
+        }
+
+    }
+}
