@@ -38,7 +38,7 @@ namespace Biosero.Scripting
 
             string InterpretedEBWork = "";
 
-            if (EBWorkToPerform == "Echo")
+            if (EBWorkToPerform == "Echo"|| EBWorkToPerform == "Bravo")
             {
                 InterpretedEBWork = "Replicate";
             }
@@ -55,7 +55,7 @@ namespace Biosero.Scripting
 
             int DestinationPriorityNum = 0;
 
-            string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+            string API_BASE_URL = context.GetGlobalVariableValue<string>("_url"); // "http://1 92.168.14.10:8105/api/v2.0/";
 
             IQueryClient _queryClient = new QueryClient(API_BASE_URL);
             IAccessioningClient _accessioningClient = new AccessioningClient(API_BASE_URL);
@@ -168,6 +168,37 @@ namespace Biosero.Scripting
             await context.AddOrUpdateGlobalVariableAsync("EBSolventTransfers", SolventTransfersList);
             await context.AddOrUpdateGlobalVariableAsync("EBSampleTransfers", SampleTransfersList);
             await context.AddOrUpdateGlobalVariableAsync("Job Priority", DestinationPriorityNum.ToString());
+
+
+            //Set status of plate to PROCESSING
+            var cc = sources
+            .Where(x => x.Name == SourceName && x.OperationType.ToString() == InterpretedEBWork)
+            .FirstOrDefault();
+
+            int SourceJobID = cc.JobId;
+            string SourceIdentifier = cc.Identifier;
+            string SourceOperationType = cc.OperationType.ToString();
+
+            cc.Properties.SetValue("Status", "Processing");
+            _identityHelper.Register(cc, SourceJobID, RequestedOrder);
+
+            Console.WriteLine($"***********    Source plate {SourceName} with ID {SourceIdentifier} for operation {SourceOperationType} status was set to Processing" + Environment.NewLine);
+
+
+            //Set status of plate to PROCESSING
+            var cc1 = destinations
+            .Where(x => x.SiblingIdentifier == SourceIdentifier && x.OperationType.ToString() == InterpretedEBWork)
+            .FirstOrDefault();
+
+            int DestinationJobID = cc1.JobId;
+            string DestinationIdentifier = cc1.Identifier;
+            string DestinationOperationType = cc1.OperationType.ToString();
+            string DestinationName2 = cc1.Name;
+
+            cc1.Properties.SetValue("Status", "Processing");
+            _identityHelper.Register(cc1, DestinationJobID, RequestedOrder);
+
+            Console.WriteLine($"***********    Destination plate {DestinationName2} with ID {DestinationIdentifier} for operatrion {DestinationOperationType} status was set to Processing" + Environment.NewLine);
 
         }
 

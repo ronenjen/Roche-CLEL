@@ -24,18 +24,17 @@ using System.IO;
 
 namespace Biosero.Scripting
 {
-    public class UpdateAssayPlatesToValidating
+    public class UpdateAssayPlatesAssayOneToTransporting
     {
 
         public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
         {
             string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
-            string EBAssayPlates = context.GetGlobalVariableValue<string>("All EB Assay Plates");
-
+            string EBAssayPlateOne = context.GetGlobalVariableValue<string>("RepOnePlaceholderBarcodes");
 
             //instantiate LAMA1 objects
 
-            string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+            string API_BASE_URL =  context.GetGlobalVariableValue<string>("_url"); // "http://1 92.168.14.10:8105/api/v2.0/";
             IQueryClient _queryClient = new QueryClient(API_BASE_URL);
             IAccessioningClient _accessioningClient = new AccessioningClient(API_BASE_URL);
             IEventClient _eventClient = new EventClient(API_BASE_URL);
@@ -58,14 +57,14 @@ namespace Biosero.Scripting
             var jobs = _identityHelper.GetJobs(RequestedOrder).ToList();
 
 
-           
-
             // Split the combined string into an array of barcodes
-            string[] allBarcodesArray = EBAssayPlates.Split(new[] { ", " }, StringSplitOptions.RemoveEmptyEntries);
+            string[] allBarcodesArray = EBAssayPlateOne.Split(new[] { "," }, StringSplitOptions.RemoveEmptyEntries);
 
+          
             // Loop through each member of the array
             foreach (string barcode in allBarcodesArray)
             {
+
                 var cc = destinations
                 .Where(x => x.Name == barcode)
                 .FirstOrDefault();
@@ -73,12 +72,15 @@ namespace Biosero.Scripting
                 int DestinationJobID = cc.JobId;
                 string DestinationName = cc.Name;
 
-                cc.Properties.SetValue("Status", "Validating");
+                cc.Properties.SetValue("Status", "Transporting");
                 _identityHelper.Register(cc, DestinationJobID, RequestedOrder);
-                
-                
-             Console.WriteLine($"Plate {DestinationName}  status was changed to VALIDATING" + Environment.NewLine);
+            Console.WriteLine($"Plate {DestinationName} status was set to TRANSPORTING " + Environment.NewLine);
             }
+
+
+
+
+
 
         }
 

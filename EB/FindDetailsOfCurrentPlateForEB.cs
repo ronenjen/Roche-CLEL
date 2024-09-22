@@ -56,7 +56,7 @@ namespace Biosero.Scripting
                 CurrentJobPriorityNumber = Int32.Parse(CurrentPriority);
             }
 
-            string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+            string API_BASE_URL = context.GetGlobalVariableValue<string>("_url"); // "http://1 92.168.14.10:8105/api/v2.0/";
             IQueryClient _queryClient = new QueryClient(API_BASE_URL);
             IAccessioningClient _accessioningClient = new AccessioningClient(API_BASE_URL);
             IEventClient _eventClient = new EventClient(API_BASE_URL);
@@ -107,52 +107,58 @@ namespace Biosero.Scripting
                 //get all sources currently on EB
                 string[] sourcesArray = CurrentSourcesOnEB.Split(',', ' ', StringSplitOptions.RemoveEmptyEntries);
 
-                Serilog.Log.Information("The following sources are currently on EB: {sourcesArray}", sourcesArray);
+                Console.WriteLine($"The following sources are currently on EB: {sourcesArray}" + Environment.NewLine);
 
+                int SourceArrayCount = 0;
                 //loop through every source on EB
                 foreach (string src in sourcesArray)
                 {
-                    Serilog.Log.Information("Source plate name on EB: {src}", src);
+                    SourceArrayCount++;
+
+                    Console.WriteLine($"The number {SourceArrayCount} source currently on EB is: {src}" + Environment.NewLine);
+
+
                     if (src == DestName)
                     {
-                     //found a match between destination plate in CP and source on EB currently
-                     var ee = sources
-                    .Where(x => x.Name == src)
-                    .First();
-                     //get the status of the current source
-                     SourceStatus = ee.Status.ToString();
+                        //found a match between destination plate in CP and source on EB currently
+                        var SourceDetails = sources
+                       .Where(x => x.Name == src)
+                       .First();
+                        //get the status of the current source
 
-                     Serilog.Log.Information("The current plate status is  {SourceStatus}", SourceStatus.ToString());
+                        SourceStatus = SourceDetails.Status.ToString();
+
+                        Console.WriteLine($"The current plate status is  {SourceStatus}" + Environment.NewLine);
 
                         if ((src != "") && (SourceStatus == "Pending"))
                         {
                             //If plate is found working on EB, set "waiting" variable to TRUE
                             JobFoundOnEB = true;
                             await context.AddOrUpdateGlobalVariableAsync("JobFoundOnEB", JobFoundOnEB);
+
+                            Console.WriteLine($"Jobs Found on EB =  {JobFoundOnEB.ToString()}" + Environment.NewLine);
                         }
 
                     }
 
-
-                    var ee1 = sources
+                    var CurrentSourceObject = sources
                    .Where(x => x.Name == CurrentSource)
                    .First();
+
                     //get the status of the current source
-                    string SourceStatus1 = ee1.Status.ToString();
+                    string SourceStatus1 = CurrentSourceObject.Status.ToString();
 
-
-
-
-
-                    Serilog.Log.Information("Current Source status is: {SourceStatus1}", SourceStatus1);
-                    Serilog.Log.Information("Current destination priority is: {DestPriorityNumber}", DestPriorityNumber);
-                    Serilog.Log.Information("Current job priority number is: {CurrentJobPriorityNumber}", CurrentJobPriorityNumber);
-                    Serilog.Log.Information("Current job number is: {RequestedJob}", RequestedJob);
+                    Console.WriteLine($"Current Source status is: {SourceStatus1}" + Environment.NewLine);
+                    Console.WriteLine($"Current destination priority is: {DestPriorityNumber}" + Environment.NewLine);
+                    Console.WriteLine($"Current job priority number is: {CurrentJobPriorityNumber}" + Environment.NewLine);
+                    Console.WriteLine($"Current job number is: {RequestedJob}" + Environment.NewLine);
 
                     if ((DestPriorityNumber < CurrentJobPriorityNumber) && (SourceStatus1 == "Pending"))
                     {
-                        Serilog.Log.Information("Higher priority job found - {RequestedJob}", RequestedJob);
+                        Console.WriteLine($"Higher priority job found - {RequestedJob}" + Environment.NewLine);
+
                         HigherPriorityJob = true;
+
                         await context.AddOrUpdateGlobalVariableAsync("HigherPriorityJob", HigherPriorityJob);
                         await context.AddOrUpdateGlobalVariableAsync("CurrentSourcePlate", DestName);
                     }
@@ -161,7 +167,6 @@ namespace Biosero.Scripting
             }
 
         }
-
 
     }
 }
