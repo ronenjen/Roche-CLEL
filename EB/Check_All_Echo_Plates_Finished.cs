@@ -23,27 +23,49 @@ using System.Collections;
 
 namespace Biosero.Scripting
 {
-    public class CheckAllQueuedEBSources
+    public class Check_All_Echo_Plates_Finished
     {
         public async Task RunAsync(DataServicesClient client, WorkflowContext context, CancellationToken cancellationToken)
         {
+
             string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
-            string CPSourcesForEB = context.GetGlobalVariableValue<string>("CPSourcesForEB");
+            int RequestedJob = context.GetGlobalVariableValue<int>("Job Number");
 
 
-            //string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+            await context.AddOrUpdateGlobalVariableAsync("Echo Plates Not Finished", true);
+
             string API_BASE_URL =  context.GetGlobalVariableValue<string>("_url"); // "http://1 92.168.14.10:8105/api/v2.0/";
+
+            string ExtractedReplicationVolume = "";
+            string ExtractedNextReplicationVolume = "";
+            string NextReplicateLabware = "";
+            string FurtherReplicateLabware = "";
+            string DestinationCommonName = "";
             
-            
+
+
+
+            int EBSourcesCount = 0;
+            int RepOneCount = 0;
+            int RepTwoCount = 0;
+
+
+            string JobWorkflowFragment = "";
+
             IQueryClient _queryClient = new QueryClient(API_BASE_URL);
             IAccessioningClient _accessioningClient = new AccessioningClient(API_BASE_URL);
             IEventClient _eventClient = new EventClient(API_BASE_URL);
 
-            List<string> AllSourcesForOrder = new List<string>();
-            List<string> QueuedSourcesForOrder = new List<string>();
-            List<string> ReadySourcesForEB = new List<string>();
-            List<string> CPToEBBarcodes = CPSourcesForEB.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries).ToList();
-
+            List<string> AllCPSourcesForEB = new List<string>();
+            List<string> AllCPSourcesIdentifiersForEB = new List<string>();
+            List<string> AllSerializePlates = new List<string>();
+            List<string> AllReplicatePlates = new List<string>();
+            List<string> AllNextReplicatePlates = new List<string>();
+            List<string> AllCrashPlatesForEB = new List<string>();
+            List<string> AllCrashPlateIdentierssForEB = new List<string>();
+            List<string> AllCrashDestinationsEB = new List<string>();
+            List<string> EchoPairList = new List<string>();
+            List<string> EchoFinishedPlates = new List<string>();
 
 
             IdentityHelper _identityHelper;
@@ -57,54 +79,67 @@ namespace Biosero.Scripting
             //Get all the sources associated with this order
             var sources = _identityHelper.GetSources(RequestedOrder).ToList();
 
-            //Get all the Sources associated with this order
-            var Sources = _identityHelper.GetSources(RequestedOrder).ToList();
+            //Get all the destinations associated with this order
+            var destinations = _identityHelper.GetDestinations(RequestedOrder).ToList();
             //Get all the jobs
             var jobs = _identityHelper.GetJobs(RequestedOrder).ToList();
 
 
-            //  MosaicSource? Source = Sources?.FirstOrDefault(d => d.Description == "777");
-            foreach (var source in sources)
+            //  MosaicDestination? destination = destinations?.FirstOrDefault(d => d.Description == "777");
+            foreach (var dest in destinations)
             {
-                string SourceID = source.Identifier;
-                string SourceName = source.Name;
-                string SourceType = source.TypeIdentifier;
-                string SourceState = source.Status.ToString();
-                string SourceOperationType = source.OperationType.ToString();
-                string SourceSampleTransfers = source.SampleTransfers; 
+                bool echoSourceFound = false;
+                string DestinationName = dest.Name;
+                string DestinationDescription = dest.Description;
+                string DestinationSampleTransfers = dest.SampleTransfers;
+                string DestinationOperationType = dest.OperationType.ToString();
+                string DestinationJobId = dest.JobId.ToString();
+                string DestinationId = dest.Identifier.ToString();
+                string DestinationStatus = dest.Status.ToString();
+                string DestinationLabwareType = dest.CommonName.ToString();
+                string DestinationParent = dest.ParentIdentifier != null ? dest.ParentIdentifier.ToString() : null;
+                    Serilog.Log.Information("Plate found in dest  = {DestinationName}", DestinationName.ToString());
+                    
+                    
+			            foreach (var src in sources)
+			            {
+			              string sourceName = src.Name.ToString();
+			              
+			              if (DestinationName == sourceName)
+			              {
+			              echoSourceFound = true;
+			              }
+			            
+			            }
+			            
+			            
 
-                bool isInList = CPToEBBarcodes.Contains(SourceName);
 
-                    if (isInList) 
-                    {
+                if ((DestinationStatus != "Finished") &&  (DestinationOperationType == "Replicate") && (echoSourceFound==false))
+                {
+                    Serilog.Log.Information("Echo Plate Not Finished = {DestinationName}", DestinationName.ToString());
 
-                        if (!AllSourcesForOrder.Contains(SourceName))
-                        {
-                            AllSourcesForOrder.Add(SourceName);
-                            QueuedSourcesForOrder.Add(SourceName);
-                        }
+                    await context.AddOrUpdateGlobalVariableAsync("Echo Plates Not Finished", true);
+                }
+                else if ((DestinationStatus == "Finished") && (DestinationOperationType == "Replicate") && (echoSourceFound==false))
+                {
+                    Serilog.Log.Information("Echo Plate  Finished = {DestinationName}", DestinationName.ToString());
+                    
+                     await context.AddOrUpdateGlobalVariableAsync("EchoDestLabwareType", DestinationLabwareType);
+
+                    await context.AddOrUpdateGlobalVariableAsync("Echo Plates Not Finished", false);
 
 
-                        if ((!ReadySourcesForEB.Contains(SourceName)) && (SourceState == "Ready"))
-                        {
-                        ReadySourcesForEB.Add((SourceName));
-                        }
-                    }
+                    EchoFinishedPlates.Add(DestinationName);
+                }
 
 
             }
 
-            string AllEBDestinedSources = string.Join(",", AllSourcesForOrder);
-            int TotalEBDestinedSources = AllSourcesForOrder.Count;
-            string AllQueuedEBDestinedSources = string.Join(",", QueuedSourcesForOrder);
-            int TotalEBQueuedDestinedSources = QueuedSourcesForOrder.Count;
-            string AllEBReadySources = string.Join(",", ReadySourcesForEB);
-            int TotalEBReadySources = ReadySourcesForEB.Count;
 
-
-            Serilog.Log.Information("TotalEBDestinedSources= {TotalEBDestinedSources} AllEBDestinedSources {AllEBDestinedSources}", TotalEBDestinedSources.ToString(), AllEBDestinedSources.ToString());
-            Serilog.Log.Information("TotalEBQueuedDestinedSources= {TotalEBQueuedDestinedSources} AllQueuedEBDestinedSources {AllQueuedEBDestinedSources}", TotalEBQueuedDestinedSources.ToString(), AllQueuedEBDestinedSources.ToString());
-            Serilog.Log.Information("TotalEBReadySources= {TotalEBReadySources} ReadySourcesForEB {ReadySourcesForEB}", TotalEBReadySources.ToString(), ReadySourcesForEB.ToString());
+            string FinishedEchoPlates = string.Join(",", EchoFinishedPlates);
+            await context.AddOrUpdateGlobalVariableAsync("Finished Echo Plates", FinishedEchoPlates);
+                    Serilog.Log.Information("FinishedEchoPlates= {FinishedEchoPlates}", FinishedEchoPlates.ToString());
 
 
         }
@@ -113,7 +148,7 @@ namespace Biosero.Scripting
             IEnumerable<DataModels.Resources.Identity> identities = typeof(T) switch
             {
                 Type t when t == typeof(MosaicSource) => _helper.GetSources(ownerId).Select(od => od as Biosero.DataModels.Resources.Identity),
-                Type t when t == typeof(MosaicSource) => _helper.GetSources(ownerId).Select(od => od as Biosero.DataModels.Resources.Identity),
+                Type t when t == typeof(MosaicDestination) => _helper.GetDestinations(ownerId).Select(od => od as Biosero.DataModels.Resources.Identity),
                 Type t when t == typeof(MosaicJob) => _helper.GetJobs(ownerId).Select(od => od as Biosero.DataModels.Resources.Identity),
                 _ => throw new Exception("Type not supported"),
             };
@@ -165,3 +200,5 @@ namespace Biosero.Scripting
 
     }
 }
+
+

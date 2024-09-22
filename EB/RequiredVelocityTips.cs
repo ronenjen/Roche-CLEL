@@ -31,7 +31,7 @@ namespace Biosero.Scripting
 
             string RequestedOrder = context.GetGlobalVariableValue<string>("Input.OrderId");
             int VelocityThresholdVolume = context.GetGlobalVariableValue<int>("VelocityThresholdVolume");
-            int RequestedJob = context.GetGlobalVariableValue<int>("Job Number");
+            string RequestedJob = context.GetGlobalVariableValue<string>("Current EB Job");
 
 
             int TotalCP = 0;
@@ -52,7 +52,7 @@ namespace Biosero.Scripting
             string VelocityTips10PlaceholderBarcodes = "";
             string VelocityTips30PlaceholderBarcodes = "";
 
-            string API_BASE_URL = "http://192.168.14.10:8105/api/v2.0/";
+            string API_BASE_URL = context.GetGlobalVariableValue<string>("_url"); // "http://1 92.168.14.10:8105/api/v2.0/";
             IQueryClient _queryClient = new QueryClient(API_BASE_URL);
             IAccessioningClient _accessioningClient = new AccessioningClient(API_BASE_URL);
             IEventClient _eventClient = new EventClient(API_BASE_URL);
@@ -77,7 +77,7 @@ namespace Biosero.Scripting
 
 
             var i = jobs
-            .Where(x => x.JobId == RequestedJob)
+            .Where(x => x.JobId == Int32.Parse(RequestedJob))
             .FirstOrDefault();
 
 
@@ -91,9 +91,10 @@ namespace Biosero.Scripting
             foreach (var dest in destinations)
             {
                 string DestinationOperation = dest.OperationType.ToString();
+                int DestJob = dest.JobId; ;
 
 
-                if (DestinationOperation == "Replicate")
+                if ((DestinationOperation == "Replicate") && (DestJob==Int32.Parse(RequestedJob)) )
                 {
                     DestSampleTransfers = double.Parse(dest.SampleTransfers);
                     DestSibling = dest.SiblingIdentifier.ToString();
@@ -106,7 +107,7 @@ namespace Biosero.Scripting
 
                     }
                 }
-                else if (DestinationOperation == "Serialise")
+                else if ((DestinationOperation == "Serialise")&& (DestJob == Int32.Parse(RequestedJob)))
                 {
                     TotalSerialise++;
                 }
@@ -114,29 +115,26 @@ namespace Biosero.Scripting
             }
             //Add an additional velocity tip for the DMSO
 
-            Console.WriteLine($"   {TotalReplicates.ToString()} Replicate tips " + Environment.NewLine);
-            Console.WriteLine($"   {TotalSerialise.ToString()} Replicate tips " + Environment.NewLine);
-
             if (TotalSerialise > 0)
             {
-                Console.WriteLine($"*******RequiredVelocityTips ****    {TotalSerialise.ToString()} Tips are required for serialisation " + Environment.NewLine);
+                Console.WriteLine($"  {TotalSerialise.ToString()} Tips are required for serialisation " + Environment.NewLine);
             }
 
 
             if (TotalReplicates > 0)
             {
-                Console.WriteLine($"*******RequiredVelocityTips ****    {TotalReplicates.ToString()} Tips are required for replication " + Environment.NewLine);
+                Console.WriteLine($" {TotalReplicates.ToString()} Tips are required for replication " + Environment.NewLine);
             }
 
 
 
             if (DestSampleTransfers >= 0.5)
             {
-                Console.WriteLine($"*******RequiredVelocityTips ****     Replication to be done on Bravo - Tips required for replication" + Environment.NewLine);
+                Console.WriteLine($" Replication to be done on Bravo - Tips required for replication" + Environment.NewLine);
             }
             else
             {
-                Console.WriteLine($"*******RequiredVelocityTips ****     Replication to be done on Echo - No tips required for replication " + Environment.NewLine);
+                Console.WriteLine($" Replication to be done on Echo - No tips required for replication " + Environment.NewLine);
             }
 
 
@@ -164,18 +162,21 @@ namespace Biosero.Scripting
 
             VelocityTips10PlaceholderBarcodes = VelocityTips10PlaceholderBarcodes.TrimEnd(',');
             VelocityTips30PlaceholderBarcodes = VelocityTips30PlaceholderBarcodes.TrimEnd(',');
-            string DS = String.Join(", ", AllDestSiblings);
 
-            Serilog.Log.Information("VelocityTips10PlaceholderBarcodes = {VelocityTips10PlaceholderBarcodes}", VelocityTips10PlaceholderBarcodes.ToString());
-            Serilog.Log.Information("DS = {DS}", DS.ToString());
+            if (VelocityTips10PlaceholderBarcodes != "")
+            {
+                Console.WriteLine($"Velocity 10 placeholder barcodes: {VelocityTips10PlaceholderBarcodes} for job {RequestedJob}" + Environment.NewLine);
+            }
 
-            Serilog.Log.Information("VelocityTips30PlaceholderBarcodes = {VelocityTips30PlaceholderBarcodes}", VelocityTips30PlaceholderBarcodes.ToString());
+            if (VelocityTips30PlaceholderBarcodes != "")
+            {
+                Console.WriteLine($"Velocity 30 placeholder barcodes: {VelocityTips30PlaceholderBarcodes} for job {RequestedJob} " + Environment.NewLine);
+            }
 
 
             await context.AddOrUpdateGlobalVariableAsync("VelocityTips10PlaceholderBarcodes", VelocityTips10PlaceholderBarcodes);
             await context.AddOrUpdateGlobalVariableAsync("VelocityTips30PlaceholderBarcodes", VelocityTips30PlaceholderBarcodes);
         }
-
 
     }
 }
